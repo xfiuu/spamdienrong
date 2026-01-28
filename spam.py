@@ -229,127 +229,267 @@ HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPAM MANAGER V7 - NEON UI</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <title>DISCORD FOLDER SPAMMER V7</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@300..800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
             --primary: #00ff41;
-            --bg-dark: #0f0f0f;
-            --bg-panel: #161616;
-            --border: #333;
-            --text-gray: #888;
+            --primary-glow: rgba(0, 255, 65, 0.3);
+            --bg: #06080a;
+            --card-bg: #0c1116;
+            --border: #1f2933;
+            --text: #f0f0f0;
+            --muted: #8899a6;
         }
-        body { background: var(--bg-dark); color: #f0f0f0; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; font-size: 14px; }
-        
-        /* SCROLLBAR */
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #111; }
-        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: var(--primary); }
-
-        .header { text-align: center; border-bottom: 1px solid var(--primary); padding-bottom: 15px; margin-bottom: 25px; box-shadow: 0 4px 15px -10px var(--primary); }
-        .header h1 { color: var(--primary); margin: 0; letter-spacing: 2px; font-size: 1.8rem; text-shadow: 0 0 10px rgba(0, 255, 65, 0.3); }
-
-        .main-container { display: flex; gap: 20px; align-items: flex-start; }
-        
-        /* SIDEBAR */
-        .sidebar { width: 280px; background: var(--bg-panel); padding: 20px; border-radius: 12px; border: 1px solid var(--border); flex-shrink: 0; height: fit-content; }
-        .sidebar h3 { margin-top: 0; color: #fff; display: flex; align-items: center; gap: 10px; font-size: 1.1em;}
-        
-        input[type="text"], textarea { 
-            width: 100%; padding: 12px; background: #0a0a0a; border: 1px solid #444; color: #fff; 
-            margin-bottom: 10px; box-sizing: border-box; border-radius: 6px; outline: none; transition: 0.3s; font-family: inherit;
+        body { 
+            background: var(--bg); 
+            color: var(--text); 
+            font-family: 'IBM Plex Sans', sans-serif; 
+            margin: 0; 
+            padding: 20px;
+            background-image: radial-gradient(circle at 50% 0%, #0d1a10 0%, var(--bg) 70%);
+            min-height: 100vh;
         }
-        input[type="text"]:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 8px rgba(0,255,65, 0.1); }
-        
-        .btn { width: 100%; padding: 12px; border: none; font-weight: 600; cursor: pointer; border-radius: 6px; margin-top: 8px; font-family: inherit; transition: all 0.2s; text-transform: uppercase; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 8px;}
-        .btn-create { background: var(--primary); color: #000; box-shadow: 0 0 10px rgba(0,255,65,0.2); }
-        .btn-create:hover { background: #00cc33; transform: translateY(-1px); }
-        .btn-refresh { background: #222; color: #aaa; margin-top: 20px; }
-        .btn-refresh:hover { background: #333; color: #fff; }
-
-        /* PANELS */
-        .groups-area { flex: 1; display: flex; flex-direction: column; gap: 20px; }
-        .panel-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; position: relative; transition: border-color 0.3s; }
-        .panel-card.active { border-color: var(--primary); box-shadow: 0 0 20px rgba(0, 255, 65, 0.05); }
-        .panel-card.active::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--primary); border-top-left-radius: 12px; border-bottom-left-radius: 12px; }
-
-        .panel-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2a2a2a; padding-bottom: 15px; margin-bottom: 20px; }
-        .panel-title { font-size: 1.2em; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 10px; }
-        .badge { padding: 4px 10px; font-size: 0.65em; border-radius: 20px; font-weight: 800; letter-spacing: 0.5px; }
-
-        .config-grid { display: grid; grid-template-columns: 220px 1fr; gap: 20px; margin-bottom: 20px; }
-        .col-title { margin-bottom: 10px; font-weight: 700; color: var(--primary); font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
-
-        .list-box { height: 350px; overflow-y: auto; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; padding: 5px; }
-
-        /* CHECKBOX STYLING */
-        input[type="checkbox"] { accent-color: var(--primary); width: 16px; height: 16px; cursor: pointer; }
-        .check-item { display: flex; align-items: center; padding: 8px 12px; cursor: pointer; border-radius: 4px; transition: background 0.2s; color: #ddd; font-size: 0.95em; }
-        .check-item:hover { background: #222; color: #fff; }
-        .check-item span { margin-left: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-        /* FOLDER UI (NEW) */
-        .folder-group { margin-bottom: 5px; border: 1px solid #222; border-radius: 6px; background: #111; overflow: hidden; }
-        .folder-group[open] { border-color: #333; }
-        
-        .folder-summary {
-            list-style: none; padding: 10px 12px; background: #1a1a1a; cursor: pointer;
-            display: flex; justify-content: space-between; align-items: center;
-            font-weight: 600; font-size: 0.9em; color: #eee; transition: background 0.2s;
+        .header { 
+            text-align: left; 
+            border-bottom: 1px solid var(--border); 
+            padding-bottom: 15px; 
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
         }
-        .folder-summary:hover { background: #252525; }
-        .folder-summary::-webkit-details-marker { display: none; } /* Hide default arrow */
-        
-        .folder-info { display: flex; align-items: center; gap: 8px; }
-        .folder-icon { color: #888; transition: transform 0.2s; }
-        .folder-group[open] .folder-summary .folder-icon { transform: rotate(90deg); color: var(--primary); }
-        
-        .btn-select-all {
-            background: #333; border: 1px solid #444; color: #ccc; font-size: 0.75em;
-            padding: 2px 8px; border-radius: 4px; cursor: pointer; transition: 0.2s;
+        .header h1 { 
+            color: var(--primary); 
+            margin: 0; 
+            text-transform: uppercase; 
+            font-size: 1.4rem; 
+            font-family: 'Oxanium', sans-serif;
+            letter-spacing: 1px;
+            text-shadow: 0 0 10px var(--primary-glow);
         }
-        .btn-select-all:hover { background: var(--primary); color: #000; border-color: var(--primary); }
+        
+        .main-container { display: flex; gap: 24px; align-items: flex-start; max-width: 1600px; margin: 0 auto; }
+        .sidebar { 
+            width: 320px; 
+            background: var(--card-bg); 
+            padding: 20px; 
+            border-radius: 12px; 
+            border: 1px solid var(--border); 
+            flex-shrink: 0;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .sidebar h3 {
+            margin-top: 0;
+            font-family: 'Oxanium', sans-serif;
+            font-size: 1rem;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn { 
+            width: 100%; 
+            padding: 12px; 
+            border: none; 
+            font-weight: bold; 
+            cursor: pointer; 
+            border-radius: 8px; 
+            margin-top: 10px; 
+            font-family: inherit; 
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .btn-create { background: var(--primary); color: #000; box-shadow: 0 4px 15px var(--primary-glow); }
+        .btn-create:hover { transform: translateY(-2px); box-shadow: 0 6px 20px var(--primary-glow); brightness: 1.1; }
+        
+        input[type="text"] { 
+            width: 100%; 
+            padding: 12px; 
+            background: #000; 
+            border: 1px solid var(--border); 
+            color: #fff; 
+            margin-bottom: 12px; 
+            box-sizing: border-box; 
+            border-radius: 8px;
+            transition: border-color 0.2s;
+        }
+        input[type="text"]:focus {
+            border-color: var(--primary);
+            outline: none;
+        }
+        
+        .groups-area { flex: 1; display: flex; flex-direction: column; gap: 24px; }
+        .panel-card { 
+            background: var(--card-bg); 
+            border: 1px solid var(--border); 
+            border-radius: 12px; 
+            padding: 20px; 
+            position: relative;
+            transition: all 0.3s;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .panel-card.active { 
+            border-color: var(--primary); 
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.05), 0 10px 40px rgba(0,0,0,0.4); 
+        }
+        .panel-card.active::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 3px;
+            background: var(--primary);
+            border-radius: 12px 12px 0 0;
+        }
+        
+        .panel-header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            border-bottom: 1px solid var(--border); 
+            padding-bottom: 15px; 
+            margin-bottom: 20px; 
+        }
+        .panel-title { 
+            font-size: 1.15rem; 
+            font-weight: 600; 
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: 'Oxanium', sans-serif;
+        }
+        .badge { 
+            padding: 4px 10px; 
+            font-size: 0.75rem; 
+            border-radius: 6px; 
+            font-weight: 700; 
+            text-transform: uppercase; 
+            letter-spacing: 0.5px;
+        }
+        
+        .config-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 20px; margin-bottom: 20px; }
+        
+        .list-box { 
+            height: 350px; 
+            overflow-y: auto; 
+            background: #040608; 
+            border: 1px solid var(--border); 
+            padding: 8px; 
+            border-radius: 10px; 
+        }
+        .check-item { 
+            display: flex; 
+            align-items: center; 
+            padding: 10px; 
+            cursor: pointer; 
+            border-radius: 6px;
+            margin-bottom: 2px;
+            font-size: 0.9rem;
+            transition: background 0.2s;
+        }
+        .check-item:hover { background: #111b14; color: var(--primary); }
+        .check-item input { 
+            margin-right: 12px; 
+            accent-color: var(--primary);
+            width: 16px;
+            height: 16px;
+        }
 
-        .folder-content { padding: 5px 0 5px 15px; border-top: 1px solid #222; background: #0e0e0e; }
-        .folder-content .check-item { font-size: 0.9em; padding: 6px 10px; }
+        .folder-header { 
+            background: #151d25; 
+            color: #ccc; 
+            padding: 10px 12px; 
+            font-weight: 600; 
+            font-size: 0.85rem; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            position: sticky; 
+            top: 0; 
+            z-index: 10; 
+            border-bottom: 1px solid var(--border);
+            border-radius: 6px;
+            margin: 10px 0 5px 0;
+        }
+        .folder-header button {
+            background: var(--border); 
+            color: #fff; 
+            border: none; 
+            padding: 4px 10px; 
+            font-size: 0.75rem; 
+            cursor: pointer; 
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        .folder-header button:hover { background: var(--primary); color: #000; }
+        
+        textarea { 
+            width: 100%; 
+            background: #040608; 
+            border: 1px solid var(--border); 
+            color: var(--primary); 
+            padding: 15px; 
+            font-family: inherit; 
+            resize: vertical; 
+            margin-bottom: 15px; 
+            box-sizing: border-box; 
+            min-height: 100px; 
+            border-radius: 10px;
+            line-height: 1.5;
+        }
+        textarea:focus { border-color: var(--primary); outline: none; }
+        
+        .action-bar { display: flex; gap: 12px; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 20px; }
+        .btn-save { background: #1f2933; color: #fff; width: auto; min-width: 100px; }
+        .btn-save:hover { background: #2d3d4d; }
+        .btn-start { background: var(--primary); color: #000; width: auto; min-width: 120px; }
+        .btn-stop { background: #ff4d4d; color: #fff; width: auto; min-width: 120px; }
+        .btn-del { background: transparent; color: #ff4d4d; width: auto; padding: 8px; border: 1px solid transparent; border-radius: 6px; }
+        .btn-del:hover { background: rgba(255, 77, 77, 0.1); border-color: rgba(255, 77, 77, 0.2); }
 
-        /* ACTION BAR */
-        .action-bar { display: flex; gap: 12px; justify-content: flex-end; border-top: 1px solid #2a2a2a; padding-top: 20px; }
-        .btn-sm { width: auto; padding: 8px 16px; margin: 0; }
-        .btn-save { background: #333; color: #fff; }
-        .btn-save:hover { background: #444; }
-        .btn-stop { background: #ff3333; color: #fff; }
-        .btn-stop:hover { background: #cc0000; }
-        .btn-del { background: #222; color: #ff3333; width: 30px; height: 30px; padding: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
-        .btn-del:hover { background: #ff3333; color: #fff; }
-
-        /* STATS */
-        .stat-box { margin-top: 25px; padding: 15px; background: #111; border-radius: 8px; border: 1px dashed #333; }
-        .stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.9em; color: #888; }
-        .stat-val { color: #fff; font-weight: bold; }
-        .stat-status { color: var(--primary); font-weight: bold; }
-
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #333; }
+        
+        .status-info {
+            padding: 15px;
+            background: rgba(0, 255, 65, 0.03);
+            border-radius: 10px;
+            border: 1px solid rgba(0, 255, 65, 0.1);
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1><i class="fas fa-network-wired"></i> SPAM MANAGER V7</h1>
+        <i class="fas fa-terminal" style="color: var(--primary); font-size: 1.2rem;"></i>
+        <h1>SPAM MANAGER V7 CONTROL PANEL</h1>
     </div>
     
     <div class="main-container">
         <div class="sidebar">
-            <h3><i class="fas fa-rocket"></i> New Campaign</h3>
-            <input type="text" id="groupName" placeholder="Nhập tên nhóm...">
-            <button class="btn btn-create" onclick="createGroup()"><i class="fas fa-plus"></i> TẠO NHÓM</button>
+            <h3><i class="fas fa-plus-circle"></i> THÊM CHIẾN DỊCH</h3>
+            <input type="text" id="groupName" placeholder="Tên chiến dịch mới...">
+            <button class="btn btn-create" onclick="createGroup()">KHỞI TẠO NHÓM</button>
             
-            <div class="stat-box">
-                <div class="stat-row"><span><i class="fas fa-robot"></i> Bots Online</span> <span class="stat-val">{{ bot_count }}</span></div>
-                <div class="stat-row"><span><i class="fas fa-folder-tree"></i> Mode</span> <span class="stat-status">API SCAN</span></div>
-                <div style="margin-top:10px; font-size:0.8em; color:#555; text-align:center;">* Bot 1 tự động đồng bộ folder</div>
+            <div class="status-info">
+                <div style="font-size: 0.9rem; color: var(--muted); margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px;">
+                    HỆ THỐNG
+                </div>
+                <div style="margin-bottom: 8px;"><i class="fas fa-robot"></i> Bots Active: <span style="color:var(--primary); font-weight:bold;">{{ bot_count }}</span></div>
+                <div><i class="fas fa-satellite-dish"></i> API Scan: 
+                    <span style="color: var(--primary); font-size: 0.85rem;">ONLINE</span>
+                </div>
             </div>
             
-            <button class="btn btn-refresh" onclick="location.reload()"><i class="fas fa-sync"></i> Refresh UI</button>
+            <button class="btn" style="background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; margin-top: 20px;" onclick="location.reload()">
+                <i class="fas fa-sync-alt"></i> LÀM MỚI DỮ LIỆU
+            </button>
         </div>
 
         <div id="groupsList" class="groups-area"></div>
@@ -360,54 +500,40 @@ HTML = """
         const folderData = {{ scanned_data|safe }};
 
         function createPanelHTML(id, grp) {
-            // 1. Render Bots
             let botChecks = '';
             bots.forEach(b => {
                 const checked = grp.bots.includes(b.index) ? 'checked' : '';
                 botChecks += `
                 <label class="check-item">
                     <input type="checkbox" value="${b.index}" ${checked}> 
+                    <i class="fas fa-user-circle" style="margin-right:8px; opacity:0.5"></i>
                     <span>Bot ${b.index + 1}: ${b.name}</span>
                 </label>`;
             });
 
-            // 2. Render Servers (Folder Accordion Style)
             let serverListHTML = '';
             if (folderData.length === 0) {
-                serverListHTML = '<div style="padding:40px 20px; color:#666; text-align:center; font-style:italic;"><i class="fas fa-spinner fa-spin"></i><br>Đang đồng bộ dữ liệu...<br>Vui lòng đợi 5s rồi F5</div>';
+                serverListHTML = '<div style="padding:40px; color:var(--muted); text-align:center;"><i class="fas fa-spinner fa-spin" style="font-size:2rem; margin-bottom:15px;"></i><br>Đang đồng bộ hóa dữ liệu từ Discord API...</div>';
             } else {
                 folderData.forEach((folder, fIndex) => {
                     const folderIdRaw = `f-${id}-${fIndex}`;
-                    const count = folder.servers.length;
-                    
-                    // Header folder (summary)
                     serverListHTML += `
-                        <details class="folder-group" open>
-                            <summary class="folder-summary">
-                                <div class="folder-info">
-                                    <i class="fas fa-chevron-right folder-icon"></i>
-                                    <span>${folder.folder_name} <span style="color:#666; font-size:0.85em;">(${count})</span></span>
-                                </div>
-                                <button class="btn-select-all" onclick="toggleFolder(this, '${folderIdRaw}')">Chọn hết</button>
-                            </summary>
-                            
-                            <div id="${folderIdRaw}-container" class="folder-content">
+                        <div class="folder-header">
+                            <span><i class="fas fa-folder" style="margin-right:8px; color:var(--primary)"></i>${folder.folder_name} <span style="opacity:0.5; font-weight:normal">(${folder.servers.length})</span></span>
+                            <button onclick="toggleFolder(this, '${folderIdRaw}')">Chọn hết</button>
+                        </div>
+                        <div id="${folderIdRaw}-container" style="padding: 5px 0;">
                     `;
-                    
-                    // List Servers
                     folder.servers.forEach(s => {
                         const checked = grp.servers.includes(s.id) ? 'checked' : '';
-                        // Icon server (nếu lỗi ảnh thì hiện icon mặc định)
-                        const iconHtml = `<i class="fas fa-server" style="color:#444; margin-right:5px; font-size:0.8em;"></i>`;
-                        
                         serverListHTML += `
-                            <label class="check-item">
-                                <input type="checkbox" value="${s.id}" ${checked} class="${folderIdRaw}-chk"> 
-                                <span>${iconHtml} ${s.name}</span>
-                            </label>`;
+                        <label class="check-item">
+                            <input type="checkbox" value="${s.id}" ${checked} class="${folderIdRaw}-chk"> 
+                            <img src="${s.icon}" style="width:20px; height:20px; border-radius:50%; margin-right:10px; border: 1px solid var(--border)">
+                            <span>${s.name}</span>
+                        </label>`;
                     });
-                    
-                    serverListHTML += `</div></details>`;
+                    serverListHTML += `</div>`;
                 });
             }
 
@@ -415,7 +541,8 @@ HTML = """
                 <div class="panel-card" id="panel-${id}">
                     <div class="panel-header">
                         <div class="panel-title">
-                            <i class="fas fa-layer-group" style="color:var(--primary)"></i> ${grp.name} 
+                            <i class="fas fa-project-diagram" style="color:var(--primary)"></i> 
+                            <span>${grp.name}</span> 
                             <span id="badge-${id}" class="badge">IDLE</span>
                         </div>
                         <button class="btn btn-del" onclick="deleteGroup('${id}')" title="Xóa nhóm"><i class="fas fa-trash-alt"></i></button>
@@ -423,34 +550,29 @@ HTML = """
                     
                     <div class="config-grid">
                         <div>
-                            <div class="col-title"><i class="fas fa-user-astronaut"></i> Chọn Bots</div>
+                            <div style="margin-bottom:12px; font-weight:600; color:var(--primary); font-size:0.85rem; text-transform:uppercase; letter-spacing:1px;"><i class="fas fa-robot"></i> ĐIỀU KHIỂN BOTS</div>
                             <div class="list-box" id="bots-${id}">${botChecks}</div>
                         </div>
-                        
                         <div>
-                            <div class="col-title"><i class="fas fa-server"></i> Chọn Servers</div>
+                            <div style="margin-bottom:12px; font-weight:600; color:var(--primary); font-size:0.85rem; text-transform:uppercase; letter-spacing:1px;"><i class="fas fa-server"></i> MỤC TIÊU SERVERS</div>
                             <div class="list-box" id="servers-${id}">${serverListHTML}</div>
                         </div>
                     </div>
                     
-                    <div style="margin-top:15px;">
-                        <div class="col-title"><i class="fas fa-comment-dots"></i> Nội dung Spam</div>
-                        <textarea id="msg-${id}" placeholder="Nhập nội dung tin nhắn spam tại đây..." rows="3">${grp.message || ''}</textarea>
+                    <div>
+                        <div style="margin-bottom:10px; font-weight:600; font-size:0.85rem; text-transform:uppercase; color:var(--muted); letter-spacing:1px;">NỘI DUNG CHIẾN DỊCH</div>
+                        <textarea id="msg-${id}" placeholder="Nhập tin nhắn spam tại đây...">${grp.message || ''}</textarea>
                     </div>
                     
                     <div class="action-bar">
-                        <button class="btn btn-sm btn-save" onclick="saveGroup('${id}')"><i class="fas fa-save"></i> LƯU CẤU HÌNH</button>
+                        <button class="btn btn-save" onclick="saveGroup('${id}')"><i class="fas fa-cloud-upload-alt"></i> LƯU CẤU HÌNH</button>
                         <span id="btn-area-${id}"></span>
                     </div>
                 </div>
             `;
         }
 
-        // --- GIỮ NGUYÊN LOGIC JS ---
         function toggleFolder(btn, classPrefix) {
-            // Ngăn sự kiện click lan ra details/summary làm đóng mở folder
-            event.preventDefault(); 
-            
             const container = document.getElementById(classPrefix + '-container');
             const checkboxes = container.querySelectorAll('input[type="checkbox"]');
             let allChecked = true;
@@ -463,14 +585,11 @@ HTML = """
             fetch('/api/groups').then(r => r.json()).then(data => {
                 const container = document.getElementById('groupsList');
                 const currentIds = Object.keys(data);
-                
-                // Remove deleted
                 Array.from(container.children).forEach(child => {
                     const childId = child.id.replace('panel-', '');
                     if (!currentIds.includes(childId)) child.remove();
                 });
 
-                // Add/Update
                 for (const [id, grp] of Object.entries(data)) {
                     let panel = document.getElementById(`panel-${id}`);
                     if (!panel) {
@@ -479,20 +598,20 @@ HTML = """
                         container.appendChild(div.firstElementChild);
                         panel = document.getElementById(`panel-${id}`);
                     }
-
                     if (grp.active) panel.classList.add('active');
                     else panel.classList.remove('active');
-
+                    
                     const badge = document.getElementById(`badge-${id}`);
-                    badge.innerText = grp.active ? 'RUNNING' : 'STOPPED';
-                    badge.style.background = grp.active ? 'var(--primary)' : '#333';
-                    badge.style.color = grp.active ? '#000' : '#fff';
+                    badge.innerText = grp.active ? 'RUNNING' : 'IDLE';
+                    badge.style.background = grp.active ? 'var(--primary)' : '#1f2933';
+                    badge.style.color = grp.active ? '#000' : '#8899a6';
+                    badge.style.boxShadow = grp.active ? '0 0 15px var(--primary-glow)' : 'none';
 
                     const btnArea = document.getElementById(`btn-area-${id}`);
                     if (grp.active) {
-                        btnArea.innerHTML = `<button class="btn btn-sm btn-stop" onclick="toggleGroup('${id}')"><i class="fas fa-stop-circle"></i> DỪNG LẠI</button>`;
+                        btnArea.innerHTML = `<button class="btn btn-stop" onclick="toggleGroup('${id}')"><i class="fas fa-stop-circle"></i> STOP SYSTEM</button>`;
                     } else {
-                        btnArea.innerHTML = `<button class="btn btn-sm btn-create" onclick="toggleGroup('${id}')"><i class="fas fa-play"></i> BẮT ĐẦU</button>`;
+                        btnArea.innerHTML = `<button class="btn btn-start" onclick="toggleGroup('${id}')"><i class="fas fa-play-circle"></i> START SYSTEM</button>`;
                     }
                 }
             });
@@ -500,7 +619,7 @@ HTML = """
 
         function createGroup() {
             const name = document.getElementById('groupName').value;
-            if(!name) return alert("Vui lòng nhập tên nhóm!");
+            if(!name) return alert("Vui lòng nhập tên chiến dịch!");
             fetch('/api/create', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name}) })
             .then(() => { document.getElementById('groupName').value = ''; renderGroups(); });
         }
@@ -510,7 +629,18 @@ HTML = """
             const bots = Array.from(document.querySelectorAll(`#bots-${id} input:checked`)).map(c => parseInt(c.value));
             const servers = Array.from(document.querySelectorAll(`#servers-${id} input:checked`)).map(c => c.value);
             fetch('/api/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id, message: msg, bots, servers}) })
-            .then(r => r.json()).then(d => alert(d.msg));
+            .then(r => r.json()).then(d => {
+                const btn = document.querySelector(`#panel-${id} .btn-save`);
+                const oldText = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-check"></i> ĐÃ LƯU!';
+                btn.style.background = 'var(--primary)';
+                btn.style.color = '#000';
+                setTimeout(() => {
+                    btn.innerHTML = oldText;
+                    btn.style.background = '';
+                    btn.style.color = '';
+                }, 2000);
+            });
         }
 
         function toggleGroup(id) {
@@ -519,7 +649,10 @@ HTML = """
         }
 
         function deleteGroup(id) {
-            if(confirm('Bạn có chắc muốn xóa nhóm này?')) fetch('/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) }).then(() => renderGroups());
+            if(confirm('Bạn có chắc muốn xóa vĩnh viễn chiến dịch này?')) {
+                fetch('/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) })
+                .then(() => renderGroups());
+            }
         }
 
         renderGroups();
