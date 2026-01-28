@@ -23,8 +23,6 @@ app = Flask(__name__)
 
 # --- DỮ LIỆU ---
 bots_instances = {}    
-# scanned_data: Cấu trúc mới chứa folder
-# Dạng: [ {'folder_name': 'Game', 'servers': [...]}, {'folder_name': 'Khác', 'servers': [...]} ]
 scanned_data = []      
 spam_groups = {}       
 channel_cache = {}     
@@ -122,96 +120,88 @@ def run_spam_group_logic(group_id):
         time.sleep(DELAY_BETWEEN_PAIRS)
         server_pair_index += 1
 
-# --- CƠ CHẾ QUÉT SERVER (V6: FOLDER + SCAN ONCE) ---
+# --- CƠ CHẾ QUÉT SERVER: DÙNG API SETTINGS ---
 async def background_server_scanner(bot, index):
-    # CHỈ BOT 1 (index 0) ĐƯỢC QUÉT
-    if index != 0: 
-        return
+    if index != 0: return
 
-    print(f"📡 [Bot 1] Đang khởi động trình quét Folder...", flush=True)
+    print(f"📡 [Bot 1] Đang gọi API User Settings để lấy Folder...", flush=True)
     await bot.wait_until_ready()
     
-    # --- LOGIC QUÉT FOLDER ---
-    # Chạy đúng 1 lần rồi thoát hàm (return)
     global scanned_data
-    temp_folders = {} # Dùng dict để gom nhóm tạm
-    
-    # Lấy danh sách Guild Folders từ discord
-    # Lưu ý: guild_folders trả về list các GuildFolder object
-    # Những server không nằm trong folder sẽ nằm rải rác hoặc không có parent
     
     try:
-        # Lấy tất cả server hiện có
-        all_guilds = {g.id: g for g in bot.guilds}
+        # 1. Gọi trực tiếp API để lấy User Settings (chứa cấu trúc Folder)
+        # Route: GET /users/@me/settings
+        route = discord.http.Route('GET', '/users/@me/settings')
+        settings_data = await bot.http.request(route)
+        
+        # Lấy danh sách folder raw từ API
+        # Cấu trúc json: "guild_folders": [{"id": 123, "guild_ids": ["id1", "id2"], "name": "Name", ...}]
+        raw_folders = settings_data.get('guild_folders', [])
+        
+        # 2. Chuẩn bị dữ liệu
+        all_guilds = {str(g.id): g for g in bot.guilds} # Map ID -> Guild Object
         processed_ids = set()
+        
+        final_list = []
+        
+        # 3. Duyệt qua từng Folder từ API
+        for folder in raw_folders:
+            folder_name = folder.get('name')
+            folder_ids = folder.get('guild_ids', [])
+            
+            # Nếu folder không có tên, Discord thường để null
+            if not folder_name:
+                folder_name = "Unnamed Folder"
 
-        # 1. Duyệt qua các Folder trước
-        if hasattr(bot, 'guild_folders'):
-            for folder in bot.guild_folders:
-                folder_name = folder.name if folder.name else "Unnamed Folder"
-                # folder.guilds chứa danh sách guild id hoặc object tùy phiên bản
-                # Chúng ta sẽ convert sang list server info
-                folder_servers = []
-                
-                for guild in folder.guilds:
-                    # guild trong folder có thể là Object hoặc ID tùy phiên bản thư viện
-                    g_id = guild.id if hasattr(guild, 'id') else guild
+            folder_servers = []
+            
+            for g_id in folder_ids:
+                g_id = str(g_id)
+                if g_id in all_guilds:
+                    guild = all_guilds[g_id]
+                    icon_link = str(guild.icon.url) if guild.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
                     
-                    real_guild = bot.get_guild(int(g_id))
-                    if real_guild:
-                        icon_link = str(real_guild.icon.url) if real_guild.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
-                        folder_servers.append({
-                            'id': str(real_guild.id),
-                            'name': real_guild.name,
-                            'icon': icon_link
-                        })
-                        processed_ids.add(real_guild.id)
-                
-                if folder_servers:
-                    if folder_name not in temp_folders:
-                        temp_folders[folder_name] = []
-                    temp_folders[folder_name].extend(folder_servers)
+                    folder_servers.append({
+                        'id': g_id,
+                        'name': guild.name,
+                        'icon': icon_link
+                    })
+                    processed_ids.add(g_id)
+            
+            # Chỉ thêm folder nếu có server
+            if folder_servers:
+                # Nếu folder chưa có tên (thường là folder ẩn hoặc gom nhóm tạm), đặt tên
+                final_list.append({'folder_name': f"📁 {folder_name}", 'servers': folder_servers})
 
-        # 2. Những server còn lại (Uncategorized)
+        # 4. Xử lý các Server không nằm trong folder nào (Uncategorized)
         uncategorized = []
         for g_id, guild in all_guilds.items():
             if g_id not in processed_ids:
                 icon_link = str(guild.icon.url) if guild.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
                 uncategorized.append({
-                    'id': str(guild.id),
+                    'id': g_id,
                     'name': guild.name,
                     'icon': icon_link
                 })
         
-        # 3. Gom lại thành list để gửi ra Web
-        final_list = []
-        
-        # Đưa Uncategorized lên đầu hoặc cuối tùy ý (để cuối cho gọn)
         if uncategorized:
-            # Sắp xếp tên server A-Z
             uncategorized.sort(key=lambda x: x['name'])
-            final_list.append({'folder_name': 'Server Lẻ (Không Folder)', 'servers': uncategorized})
-            
-        for fname, s_list in temp_folders.items():
-            s_list.sort(key=lambda x: x['name'])
-            final_list.append({'folder_name': f"📁 {fname}", 'servers': s_list})
+            final_list.append({'folder_name': 'Server Lẻ (Ngoài Folder)', 'servers': uncategorized})
             
         scanned_data = final_list
-        
         total_sv = sum(len(x['servers']) for x in final_list)
-        print(f"✨ [Bot 1] QUÉT XONG! Tìm thấy {total_sv} servers trong {len(final_list)} nhóm.", flush=True)
+        print(f"✨ [Bot 1] QUÉT XONG! Tìm thấy {total_sv} servers (API Mode).", flush=True)
 
     except Exception as e:
-        print(f"❌ [Bot 1] Lỗi quét folder: {e}")
-        # Fallback: Nếu lỗi folder, quét phẳng như cũ
+        print(f"❌ [Bot 1] Lỗi quét API: {e}")
+        # Fallback: Quét thường nếu API lỗi
         flat_list = []
         for guild in bot.guilds:
             icon_link = str(guild.icon.url) if guild.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
             flat_list.append({'id': str(guild.id), 'name': guild.name, 'icon': icon_link})
         scanned_data = [{'folder_name': 'All Servers (Backup)', 'servers': flat_list}]
-        print("⚠️ Đã chuyển sang chế độ quét thường (Backup mode).")
 
-    # Không loop nữa, kết thúc luồng này
     return
 
 def start_bot_node(token, index):
@@ -225,7 +215,6 @@ def start_bot_node(token, index):
         bots_instances[index] = {
             'client': bot, 'loop': loop, 'name': bot.user.name, 'id': bot.user.id
         }
-        # Chỉ gọi scanner cho bot đầu tiên
         bot.loop.create_task(background_server_scanner(bot, index))
 
     try:
@@ -233,14 +222,14 @@ def start_bot_node(token, index):
     except Exception as e:
         print(f"❌ Bot {index+1} lỗi login: {e}")
 
-# --- GIAO DIỆN WEB (CẬP NHẬT HỖ TRỢ FOLDER) ---
+# --- GIAO DIỆN WEB ---
 HTML = """
 <!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DISCORD FOLDER SPAMMER V6</title>
+    <title>DISCORD FOLDER SPAMMER V7</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { background: #0f0f0f; color: #f0f0f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; }
@@ -292,7 +281,6 @@ HTML = """
         .btn-stop { background: #ff3333; color: #fff; width: auto; }
         .btn-del { background: #ff3333; color: #fff; width: auto; padding: 5px 10px; font-size: 0.8em; }
 
-        /* SCROLLBAR */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #000; }
         ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
@@ -300,7 +288,7 @@ HTML = """
     </style>
 </head>
 <body>
-    <div class="header"><h1><i class="fas fa-folder-tree"></i> FOLDER SPAM MANAGER V6</h1></div>
+    <div class="header"><h1><i class="fas fa-folder-tree"></i> SPAM MANAGER V7 (API SCAN)</h1></div>
     
     <div class="main-container">
         <div class="sidebar">
@@ -311,7 +299,7 @@ HTML = """
             <div style="margin-top: 20px; font-size: 0.85em; color: #888;">
                 <div><i class="fas fa-robot"></i> Bots Online: <span style="color:#fff; font-weight:bold;">{{ bot_count }}</span></div>
                 <div style="margin-top:5px;"><i class="fas fa-sync"></i> Bot 1 Scan Status: <br>
-                    <span style="color: #00ff41;">Đã quét xong (1 lần)</span>
+                    <span style="color: #00ff41;">Xong (Dùng API Settings)</span>
                 </div>
             </div>
             <button class="btn" style="background: #333; color: #aaa; font-size: 0.8em;" onclick="location.reload()">Refresh Page</button>
@@ -322,10 +310,9 @@ HTML = """
 
     <script>
         const bots = {{ bots_json|safe }};
-        const folderData = {{ scanned_data|safe }}; // Dữ liệu cấu trúc Folder
+        const folderData = {{ scanned_data|safe }};
 
         function createPanelHTML(id, grp) {
-            // 1. Render Bot List
             let botChecks = '';
             bots.forEach(b => {
                 const checked = grp.bots.includes(b.index) ? 'checked' : '';
@@ -336,15 +323,12 @@ HTML = """
                 </label>`;
             });
 
-            // 2. Render Server List (Theo Folder)
             let serverListHTML = '';
             if (folderData.length === 0) {
-                serverListHTML = '<div style="padding:20px; color:#888; text-align:center;">Bot 1 đang khởi động & quét...<br>Vui lòng F5 sau 5 giây.</div>';
+                serverListHTML = '<div style="padding:20px; color:#888; text-align:center;">Đang lấy dữ liệu từ API Settings...<br>Đợi 5s và F5 lại.</div>';
             } else {
                 folderData.forEach((folder, fIndex) => {
-                    const folderIdRaw = `f-${id}-${fIndex}`; // ID định danh cho folder trong DOM
-                    
-                    // Header của Folder
+                    const folderIdRaw = `f-${id}-${fIndex}`;
                     serverListHTML += `
                         <div class="folder-header">
                             <span>${folder.folder_name} (${folder.servers.length})</span>
@@ -352,8 +336,6 @@ HTML = """
                         </div>
                         <div id="${folderIdRaw}-container">
                     `;
-                    
-                    // List Servers trong Folder đó
                     folder.servers.forEach(s => {
                         const checked = grp.servers.includes(s.id) ? 'checked' : '';
                         serverListHTML += `
@@ -362,8 +344,7 @@ HTML = """
                             <span>${s.name}</span>
                         </label>`;
                     });
-                    
-                    serverListHTML += `</div>`; // Đóng container folder
+                    serverListHTML += `</div>`;
                 });
             }
 
@@ -383,7 +364,7 @@ HTML = """
                             <div class="list-box" id="bots-${id}">${botChecks}</div>
                         </div>
                         <div>
-                            <div style="margin-bottom:8px; font-weight:bold; color:#00ff41"><i class="fas fa-server"></i> CHỌN SERVERS (Theo Folder)</div>
+                            <div style="margin-bottom:8px; font-weight:bold; color:#00ff41"><i class="fas fa-server"></i> CHỌN SERVERS</div>
                             <div class="list-box" id="servers-${id}">${serverListHTML}</div>
                         </div>
                     </div>
@@ -401,19 +382,12 @@ HTML = """
             `;
         }
 
-        // Script chọn nhanh cả Folder
         function toggleFolder(btn, classPrefix) {
             const container = document.getElementById(classPrefix + '-container');
             const checkboxes = container.querySelectorAll('input[type="checkbox"]');
-            
-            // Kiểm tra xem trạng thái hiện tại là chọn hết hay chưa
             let allChecked = true;
             checkboxes.forEach(cb => { if(!cb.checked) allChecked = false; });
-            
-            // Đảo ngược trạng thái
             checkboxes.forEach(cb => cb.checked = !allChecked);
-            
-            // Cập nhật text nút
             btn.innerText = !allChecked ? "Bỏ chọn" : "Chọn hết";
         }
 
@@ -421,14 +395,11 @@ HTML = """
             fetch('/api/groups').then(r => r.json()).then(data => {
                 const container = document.getElementById('groupsList');
                 const currentIds = Object.keys(data);
-                
-                // Xóa panel thừa
                 Array.from(container.children).forEach(child => {
                     const childId = child.id.replace('panel-', '');
                     if (!currentIds.includes(childId)) child.remove();
                 });
 
-                // Thêm/Update panel
                 for (const [id, grp] of Object.entries(data)) {
                     let panel = document.getElementById(`panel-${id}`);
                     if (!panel) {
@@ -437,16 +408,12 @@ HTML = """
                         container.appendChild(div.firstElementChild);
                         panel = document.getElementById(`panel-${id}`);
                     }
-
-                    // Update Style Active/Inactive
                     if (grp.active) panel.classList.add('active');
                     else panel.classList.remove('active');
-
                     const badge = document.getElementById(`badge-${id}`);
                     badge.innerText = grp.active ? 'ĐANG CHẠY' : 'ĐÃ DỪNG';
                     badge.style.background = grp.active ? '#00ff41' : '#333';
                     badge.style.color = grp.active ? '#000' : '#fff';
-
                     const btnArea = document.getElementById(`btn-area-${id}`);
                     if (grp.active) {
                         btnArea.innerHTML = `<button class="btn btn-stop" onclick="toggleGroup('${id}')"><i class="fas fa-stop"></i> STOP</button>`;
@@ -467,9 +434,7 @@ HTML = """
         function saveGroup(id) {
             const msg = document.getElementById(`msg-${id}`).value;
             const bots = Array.from(document.querySelectorAll(`#bots-${id} input:checked`)).map(c => parseInt(c.value));
-            // Lấy tất cả server đã check (bất kể trong folder nào)
             const servers = Array.from(document.querySelectorAll(`#servers-${id} input:checked`)).map(c => c.value);
-            
             fetch('/api/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id, message: msg, bots, servers}) })
             .then(r => r.json()).then(d => alert(d.msg));
         }
@@ -484,7 +449,6 @@ HTML = """
         }
 
         renderGroups();
-        // Giảm tần suất refresh để tránh lag UI khi list dài
         setInterval(renderGroups, 3000); 
     </script>
 </body>
@@ -495,7 +459,6 @@ HTML = """
 @app.route('/')
 def index():
     bots_list = [{'index': k, 'name': v['name']} for k, v in bots_instances.items()]
-    # Truyền scanned_data (đã chia folder) xuống template
     return render_template_string(HTML, bots_json=bots_list, scanned_data=scanned_data, bot_count=len(bots_instances))
 
 @app.route('/api/groups')
@@ -531,7 +494,7 @@ def del_grp():
     return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
-    print("🔥 SYSTEM V6 STARTING... (Bot 1 will scan once)", flush=True)
+    print("🔥 SYSTEM V7 STARTING... (API Mode Scan)", flush=True)
     for i, t in enumerate(TOKENS):
         if t.strip(): threading.Thread(target=start_bot_node, args=(t, i), daemon=True).start(); time.sleep(1)
     
