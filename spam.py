@@ -11,14 +11,12 @@ from dotenv import load_dotenv
 # --- CẤU HÌNH ---
 load_dotenv()
 TOKENS = os.getenv("TOKENS", "").split(",")
-
-# Lọc bỏ token rỗng
 TOKENS = [t.strip() for t in TOKENS if t.strip()]
 
 if not TOKENS:
     print("❌ LỖI: Chưa nhập Tokens trong file .env")
 
-# Tắt bớt log rác của thư viện, chỉ hiện lỗi quan trọng
+# Tắt log rác, chỉ hiện lỗi quan trọng
 logging.getLogger('discord').setLevel(logging.ERROR)
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
@@ -31,7 +29,7 @@ spam_groups = {}
 channel_cache = {}     
 
 # ==========================================
-# PHẦN CORE LOGIC ĐÃ FIX LỖI (QUAN TRỌNG)
+# 1. CORE LOGIC: GỬI TIN NHẮN & TÌM KÊNH
 # ==========================================
 
 def send_message_from_sync(bot_index, channel_id, content):
@@ -51,19 +49,18 @@ def send_message_from_sync(bot_index, channel_id, content):
                 try:
                     channel = await bot.fetch_channel(int(channel_id))
                 except discord.NotFound:
-                    print(f"❌ [Bot {bot_index+1}] Kênh {channel_id} không tồn tại.")
+                    # Kênh bị xóa hoặc sai ID
                     return
                 except discord.Forbidden:
                     print(f"🚫 [Bot {bot_index+1}] Không có quyền xem kênh {channel_id}.")
                     return
-                except Exception as e:
-                    # Lỗi mạng hoặc lỗi lạ
+                except Exception:
                     return 
 
             # 3. Gửi tin nhắn
-            await channel.send(content)
-            # Uncomment dòng dưới nếu muốn thấy log gửi thành công (sẽ spam console)
-            # print(f"✅ [Bot {bot_index+1}] Sent to {channel.name}")
+            if channel:
+                await channel.send(content)
+                # print(f"✅ [Bot {bot_index+1}] Sent to {channel.name}") # Bật dòng này nếu muốn spam log
 
         except discord.Forbidden:
             print(f"🚫 [Bot {bot_index+1}] Bị chặn chat tại kênh {channel_id}")
@@ -73,13 +70,16 @@ def send_message_from_sync(bot_index, channel_id, content):
             else:
                 print(f"❌ [Bot {bot_index+1}] Lỗi HTTP: {e}")
         except Exception as e:
-            print(f"❌ [Bot {bot_index+1}] Lỗi không xác định: {e}")
+            print(f"❌ [Bot {bot_index+1}] Lỗi: {e}")
 
     if loop.is_running():
         asyncio.run_coroutine_threadsafe(_send(), loop)
 
 def resolve_spam_channel(bot_indices, guild_id):
-    """Tìm kênh để spam (Ưu tiên cache -> Tìm 'spam' -> Tìm 'chat')"""
+    """
+    Tìm kênh thông minh: 
+    1. Check Cache -> 2. Nếu rỗng thì Fetch API -> 3. Lọc theo tên (spam > chat > general)
+    """
     guild_id = str(guild_id)
     if guild_id in channel_cache: return channel_cache[guild_id]
     
@@ -89,38 +89,64 @@ def resolve_spam_channel(bot_indices, guild_id):
         bot_data = bots_instances.get(b_idx)
         if not bot_data: continue
         bot = bot_data['client']
+        loop = bot_data['loop']
         
         guild = bot.get_guild(int(guild_id))
         if not guild: continue
         
-        text_channels = guild.text_channels
+        # --- FIX LỖI CACHE RỖNG ---
+        channels = guild.text_channels
         
-        # Ưu tiên 1: Kênh có tên chứa 'spam' hoặc 'chat'
-        candidates = [c for c in text_channels if 'spam' in c.name.lower() or 'chat' in c.name.lower()]
-        
+        # Nếu cache chưa có kênh nào, ép bot tải lại từ server
+        if not channels:
+            try:
+                # Gọi hàm fetch_channels từ luồng async về luồng sync
+                future = asyncio.run_coroutine_threadsafe(guild.fetch_channels(), loop)
+                fetched_channels = future.result(timeout=5) # Đợi tối đa 5s
+                channels = [c for c in fetched_channels if isinstance(c, discord.TextChannel)]
+                if channels:
+                    print(f"📥 [Bot {b_idx+1}] Đã tải mới {len(channels)} kênh từ server {guild.name}")
+            except Exception as e:
+                print(f"⚠️ [Bot {b_idx+1}] Lỗi tải kênh server {guild_id}: {e}")
+                continue
+
+        # --- LOGIC TÌM KÊNH ƯU TIÊN ---
+        candidates = []
+        for c in channels:
+            c_name = c.name.lower()
+            # Ưu tiên 1: Có chữ 'spam'
+            if 'spam' in c_name: 
+                candidates.insert(0, c) 
+            # Ưu tiên 2: Có chữ 'chat'
+            elif 'chat' in c_name: 
+                candidates.append(c)
+            # Ưu tiên 3: Có chữ 'general' hoặc 'chung'
+            elif 'general' in c_name or 'chung' in c_name:
+                candidates.append(c)
+
         if candidates:
-            # Lấy cái đầu tiên tìm thấy
-            exact = candidates[0] 
-            target_channel_id = exact.id
-        elif text_channels:
-            # Ưu tiên 2: Lấy kênh chat bất kỳ đầu tiên (nếu không tìm thấy spam/chat)
-            # Cảnh báo: Có thể spam nhầm vào kênh rule/welcome
-            target_channel_id = text_channels[0].id
+            # Lấy ứng cử viên tốt nhất
+            target_channel_id = candidates[0].id
+            print(f"🎯 [Server {guild.name}] Tìm thấy kênh: {candidates[0].name}")
+        elif channels:
+            # Đường cùng: Lấy kênh đầu tiên có thể chat
+            target_channel_id = channels[0].id
+            print(f"🎲 [Server {guild.name}] Lấy đại kênh đầu tiên: {channels[0].name}")
 
         if target_channel_id:
             channel_cache[guild_id] = target_channel_id
-            print(f"🔎 [Server {guild.name}] Chọn kênh: {target_channel_id}")
             return target_channel_id
             
+    print(f"❌ [Server {guild_id}] Không tìm thấy kênh nào để spam.")
     return None
 
 def run_spam_group_logic(group_id):
     """Luồng xử lý spam đa luồng"""
     print(f"🚀 [Group {group_id}] Bắt đầu chạy...", flush=True)
     server_pair_index = 0
-    DELAY_BETWEEN_PAIRS = 2.0  # Nghỉ giữa các cặp server
-    DELAY_WITHIN_PAIR = 1.0    # Nghỉ giữa server 1 và server 2 trong cặp
-    MAX_THREADS = 5            # Số bot gửi đồng thời
+    DELAY_BETWEEN_PAIRS = 2.0  
+    DELAY_WITHIN_PAIR = 1.0    
+    MAX_THREADS = 5            
 
     while True:
         group = spam_groups.get(group_id)
@@ -138,7 +164,7 @@ def run_spam_group_logic(group_id):
         # Logic xoay vòng server
         if server_pair_index * 2 >= len(target_servers):
             server_pair_index = 0
-            time.sleep(1) # Nghỉ nhẹ khi hết vòng
+            time.sleep(1) 
         
         start_index = server_pair_index * 2
         current_pair_ids = target_servers[start_index : start_index + 2]
@@ -146,7 +172,6 @@ def run_spam_group_logic(group_id):
         if not current_pair_ids:
             server_pair_index = 0; continue
 
-        # Lấy ID kênh chat cho các server trong cặp
         valid_targets = []
         for s_id in current_pair_ids:
             c_id = resolve_spam_channel(target_bots, s_id)
@@ -155,20 +180,17 @@ def run_spam_group_logic(group_id):
         if not valid_targets:
             server_pair_index += 1; continue
 
-        # Chia nhỏ Bot ra để gửi (Multi-threading sending)
         bot_chunks = [target_bots[i:i + MAX_THREADS] for i in range(0, len(target_bots), MAX_THREADS)]
         threads = []
         
         for bot_chunk in bot_chunks:
             def thread_task(bots=bot_chunk, targets=valid_targets):
-                # Gửi Server 1
                 if len(targets) > 0:
                     svr1_id, ch1_id = targets[0]
                     for b_idx in bots:
                         send_message_from_sync(b_idx, ch1_id, message)
-                        time.sleep(0.05) # Delay cực nhỏ để tránh crash socket
+                        time.sleep(0.05)
                 
-                # Gửi Server 2 (nếu có)
                 if len(targets) > 1:
                     time.sleep(DELAY_WITHIN_PAIR)
                     svr2_id, ch2_id = targets[1]
@@ -185,14 +207,12 @@ def run_spam_group_logic(group_id):
         server_pair_index += 1
 
 # ==========================================
-# KHỞI TẠO BOT & QUÉT FOLDER
+# 2. KHỞI TẠO BOT & QUÉT FOLDER
 # ==========================================
 
 def start_bot_node(token, index):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
-    # Quan trọng: self_bot=True để dùng Token user
     bot = discord.Client(self_bot=True)
 
     @bot.event
@@ -202,19 +222,17 @@ def start_bot_node(token, index):
             'client': bot, 'loop': loop, 'name': bot.user.name, 'id': bot.user.id
         }
         
-        # CHỈ BOT 1 QUÉT FOLDER (Để tránh spam API lấy folder)
+        # Chỉ Bot 1 quét folder
         if index == 0:
-            print(f"📡 [Bot 1] Đang đọc cấu trúc Thư mục (Folder) từ Discord...", flush=True)
+            print(f"📡 [Bot 1] Đang quét Folder...", flush=True)
             await asyncio.sleep(5) 
             
-            # 1. Lấy danh sách Guild cơ bản
-            temp_servers = {}
-            for guild in bot.guilds:
-                icon_link = str(guild.icon.url) if guild.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
-                temp_servers[str(guild.id)] = {'id': str(guild.id), 'name': guild.name, 'icon': icon_link}
-
-            # 2. Gọi API lấy User Settings để xem Folder
             try:
+                temp_servers = {}
+                for guild in bot.guilds:
+                    icon_link = str(guild.icon.url) if guild.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
+                    temp_servers[str(guild.id)] = {'id': str(guild.id), 'name': guild.name, 'icon': icon_link}
+
                 user_settings = await bot.http.request(discord.http.Route('GET', '/users/@me/settings'))
                 guild_folders = user_settings.get('guild_folders', [])
                 
@@ -237,18 +255,16 @@ def start_bot_node(token, index):
                     if folder_servers:
                         folders_structure.append({'id': folder_id, 'name': folder_name, 'servers': folder_servers})
 
-                # Server chưa xếp folder
                 uncategorized = [s for gid, s in temp_servers.items() if gid not in scanned_ids]
                 if uncategorized:
                     folders_structure.append({'id': 'uncategorized', 'name': 'Server Lẻ', 'servers': uncategorized})
 
                 scanned_data['folders'] = folders_structure
                 scanned_data['servers'] = temp_servers
-                
-                print(f"✨ [Bot 1] Đã quét xong: {len(folders_structure)} Folder, {len(temp_servers)} Server.", flush=True)
+                print(f"✨ [Bot 1] Quét xong: {len(folders_structure)} Folder, {len(temp_servers)} Server.", flush=True)
 
             except Exception as e:
-                print(f"⚠️ [Bot 1] Lỗi đọc Folder: {e}. Dùng danh sách thường.", flush=True)
+                print(f"⚠️ [Bot 1] Lỗi đọc Folder: {e}. Dùng chế độ danh sách thường.", flush=True)
                 scanned_data['folders'] = [{'id': 'all', 'name': 'Tất cả Server', 'servers': list(temp_servers.values())}]
                 scanned_data['servers'] = temp_servers
 
@@ -258,7 +274,7 @@ def start_bot_node(token, index):
         print(f"❌ Bot {index+1} lỗi login: {e}")
 
 # ==========================================
-# GIAO DIỆN WEB (HTML)
+# 3. GIAO DIỆN WEB (FIXED AUTO-SAVE)
 # ==========================================
 HTML = """
 <!DOCTYPE html>
@@ -266,7 +282,7 @@ HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPAM TOOL V7 - FIXED EDITION</title>
+    <title>SPAM TOOL V7 - FINAL FIX</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { background: #0f0f0f; color: #f0f0f0; font-family: 'Segoe UI', monospace; margin: 0; padding: 20px; font-size: 14px;}
@@ -305,7 +321,6 @@ HTML = """
         .server-item { display: flex; align-items: center; padding: 5px 10px; border-bottom: 1px solid #222; color: #ccc; }
         .server-item:hover { color: #00ff41; background: #1a1a1a; }
         .server-item input { margin-right: 10px; }
-
         .bot-item { display: flex; align-items: center; padding: 5px; border-bottom: 1px solid #222; }
         
         textarea { width: 100%; background: #050505; border: 1px solid #333; color: #00ff41; padding: 10px; resize: vertical; margin-bottom: 10px; box-sizing: border-box; min-height: 60px;}
@@ -318,7 +333,6 @@ HTML = """
 </head>
 <body>
     <div class="header"><h1><i class="fas fa-robot"></i> SPAM TOOL V7 - FINAL FIX</h1></div>
-    
     <div class="main-container">
         <div class="sidebar">
             <h3>Tạo Panel Mới</h3>
@@ -356,7 +370,6 @@ HTML = """
                             ${s.name}
                         </label>`;
                     });
-
                     folderHtml += `
                     <div class="folder-group">
                         <div class="folder-header" onclick="toggleFolderContent(this)">
@@ -423,7 +436,6 @@ HTML = """
                         container.appendChild(div.firstElementChild);
                         panel = document.getElementById(`panel-${id}`);
                     }
-                    
                     const badge = document.getElementById(`badge-${id}`);
                     if (grp.active) {
                         panel.classList.add('active');
@@ -436,7 +448,6 @@ HTML = """
                         badge.style.background = '#333';
                         badge.style.color = '#fff';
                     }
-
                     const btnArea = document.getElementById(`btn-area-${id}`);
                     btnArea.innerHTML = grp.active 
                         ? `<button class="btn btn-sm btn-stop" onclick="toggleGroup('${id}')">DỪNG LẠI</button>` 
@@ -446,13 +457,35 @@ HTML = """
         }
 
         function createGroup() { const name = document.getElementById('groupName').value; if(name) fetch('/api/create', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name}) }).then(() => { document.getElementById('groupName').value = ''; renderGroups(); }); }
+        
         function saveGroup(id) { 
             const msg = document.getElementById(`msg-${id}`).value; 
             const bots = Array.from(document.querySelectorAll(`#bots-${id} input:checked`)).map(c => parseInt(c.value)); 
             const servers = Array.from(document.querySelectorAll(`#servers-${id} input:checked`)).map(c => c.value); 
             fetch('/api/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id, message: msg, bots, servers}) }).then(r => r.json()).then(d => alert(d.msg)); 
         }
-        function toggleGroup(id) { fetch('/api/toggle', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) }).then(() => setTimeout(renderGroups, 200)); }
+
+        // --- HÀM TOGGLE ĐÃ SỬA: LƯU TRƯỚC RỒI MỚI CHẠY ---
+        function toggleGroup(id) { 
+            const msg = document.getElementById(`msg-${id}`).value; 
+            const bots = Array.from(document.querySelectorAll(`#bots-${id} input:checked`)).map(c => parseInt(c.value)); 
+            const servers = Array.from(document.querySelectorAll(`#servers-${id} input:checked`)).map(c => c.value); 
+            
+            // 1. Gọi API Update để lưu cấu hình hiện tại
+            fetch('/api/update', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({id, message: msg, bots, servers}) 
+            }).then(() => {
+                // 2. Sau khi lưu xong mới gọi API Toggle
+                fetch('/api/toggle', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({id}) 
+                }).then(() => setTimeout(renderGroups, 200));
+            });
+        }
+
         function deleteGroup(id) { if(confirm('Xóa nhóm này?')) fetch('/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) }).then(() => renderGroups()); }
 
         renderGroups(); setInterval(renderGroups, 2000);
@@ -462,7 +495,7 @@ HTML = """
 """
 
 # ==========================================
-# FLASK API
+# 4. FLASK API & MAIN
 # ==========================================
 
 @app.route('/')
@@ -484,7 +517,7 @@ def update_grp():
     d = request.json
     if d['id'] in spam_groups:
         spam_groups[d['id']].update({'bots': d['bots'], 'servers': d['servers'], 'message': d['message']})
-    return jsonify({'status': 'ok', 'msg': '✅ Config Saved!'})
+    return jsonify({'status': 'ok', 'msg': '✅ Cấu hình đã lưu!'})
 
 @app.route('/api/toggle', methods=['POST'])
 def toggle_grp(): 
@@ -504,16 +537,12 @@ def del_grp():
         del spam_groups[gid]
     return jsonify({'status': 'ok'})
 
-# ==========================================
-# MAIN EXECUTION
-# ==========================================
 if __name__ == '__main__':
-    print("🔥 SYSTEM STARTING... (V7 - Fixed Edition)", flush=True)
+    print("🔥 SYSTEM STARTING... (V7 - Final Fix)", flush=True)
     
-    # Khởi chạy từng bot trong Thread riêng
     for i, t in enumerate(TOKENS):
         threading.Thread(target=start_bot_node, args=(t, i), daemon=True).start()
-        time.sleep(1) # Delay nhẹ để tránh login đồng thời
+        time.sleep(1) 
         
     port = int(os.environ.get("PORT", 10000))
     print(f"🌍 WEB PANEL: http://0.0.0.0:{port}")
