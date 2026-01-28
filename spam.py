@@ -20,67 +20,58 @@ if not TOKENS or TOKENS == ['']:
     print("❌ LỖI: Chưa nhập Tokens trong file .env")
     TOKENS = []
 
-# Tắt log rác
 logging.getLogger('discord').setLevel(logging.WARNING)
-
 app = Flask(__name__)
 
-# --- DỮ LIỆU TOÀN CỤC ---
+# --- DỮ LIỆU ---
 bots_instances = {}   
 scanned_data = {"folders": [], "servers": {}} 
 spam_groups = {}      
 channel_cache = {}    
 
-# --- 1. HỆ THỐNG LƯU TRỮ (JSONBIN) ---
+# --- 1. HỆ THỐNG LƯU TRỮ ---
 def save_settings():
-    """Lưu cấu hình các nhóm SPAM lên JSONBin hoặc File"""
-    data_to_save = {'spam_groups': spam_groups}
-    
-    # 1. Lưu Local (Backup)
+    data = {'spam_groups': spam_groups}
     try:
         with open('spam_settings.json', 'w', encoding='utf-8') as f:
-            json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
     except: pass
 
-    # 2. Lưu JSONBin (Nếu có config)
     if JSONBIN_API_KEY and JSONBIN_BIN_ID:
         def _upload():
-            headers = {'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY}
-            url = f"https://api.jsonbin.io/v3/b/{JSONBIN_BIN_ID}"
             try:
-                requests.put(url, json=data_to_save, headers=headers)
-                print("☁️ Đã lưu cấu hình lên Cloud (JSONBin).", flush=True)
-            except Exception as e:
-                print(f"⚠️ Lỗi lưu Cloud: {e}", flush=True)
+                requests.put(
+                    f"https://api.jsonbin.io/v3/b/{JSONBIN_BIN_ID}",
+                    json=data,
+                    headers={'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY}
+                )
+            except: pass
         threading.Thread(target=_upload).start()
 
 def load_settings():
-    """Tải cấu hình từ JSONBin hoặc File"""
     global spam_groups
-    
-    # 1. Ưu tiên tải từ Cloud
+    # 1. Cloud
     if JSONBIN_API_KEY and JSONBIN_BIN_ID:
         try:
-            headers = {'X-Master-Key': JSONBIN_API_KEY}
-            url = f"https://api.jsonbin.io/v3/b/{JSONBIN_BIN_ID}/latest"
-            resp = requests.get(url, headers=headers)
+            resp = requests.get(
+                f"https://api.jsonbin.io/v3/b/{JSONBIN_BIN_ID}/latest",
+                headers={'X-Master-Key': JSONBIN_API_KEY}
+            )
             if resp.status_code == 200:
-                record = resp.json().get('record', {})
-                spam_groups.update(record.get('spam_groups', {}))
-                print("☁️ Đã tải cấu hình từ Cloud.", flush=True)
+                spam_groups.update(resp.json().get('record', {}).get('spam_groups', {}))
+                print("☁️ Đã tải config từ Cloud.", flush=True)
                 return
         except: pass
-
-    # 2. Nếu lỗi cloud, tải từ Local
+    
+    # 2. Local
     if os.path.exists('spam_settings.json'):
         try:
             with open('spam_settings.json', 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                spam_groups.update(data.get('spam_groups', {}))
-                print("📂 Đã tải cấu hình từ File local.", flush=True)
+                spam_groups.update(json.load(f).get('spam_groups', {}))
+                print("📂 Đã tải config từ Local.", flush=True)
         except: pass
 
-# --- 2. LOGIC SPAM CỐT LÕI (FIXED) ---
+# --- 2. LOGIC SPAM (FIXED CACHE) ---
 def send_message_from_sync(bot_index, channel_id, content):
     bot_data = bots_instances.get(bot_index)
     if not bot_data: return
@@ -89,190 +80,137 @@ def send_message_from_sync(bot_index, channel_id, content):
     
     async def _send():
         try:
+            # FIX: Dùng fetch_channel nếu get_channel trả về None (Do chưa cache)
             channel = bot.get_channel(int(channel_id))
+            if not channel:
+                try: channel = await bot.fetch_channel(int(channel_id))
+                except: pass
+            
             if channel:
                 await channel.send(content)
-                # print(f"✅ [Bot {bot_index+1}] Sent to {channel.guild.name}", flush=True)
-            else:
-                # Nếu không tìm thấy kênh bằng ID, thử fetch lại (do cache lỗi)
-                try:
-                    ch = await bot.fetch_channel(int(channel_id))
-                    await ch.send(content)
-                except:
-                    pass
+                # print(f"✅ Bot {bot_index+1} sent to {channel.id}", flush=True)
         except: pass
 
     if loop.is_running():
         asyncio.run_coroutine_threadsafe(_send(), loop)
 
 def resolve_spam_channel(bot_indices, guild_id):
-    """
-    Tìm kênh spam trong server.
-    Nâng cấp: Nếu cache lỗi, thử tìm lại bằng bot khác.
-    """
     guild_id = str(guild_id)
-    
-    # Check cache trước
-    if guild_id in channel_cache:
-        return channel_cache[guild_id]
+    if guild_id in channel_cache: return channel_cache[guild_id]
     
     for b_idx in bot_indices:
         bot_data = bots_instances.get(b_idx)
         if not bot_data: continue
+        
         bot = bot_data['client']
         guild = bot.get_guild(int(guild_id))
-        
         if not guild: continue
         
-        # Tìm các kênh tiềm năng
-        target_channel = None
+        target = None
+        # Ưu tiên tìm tên 'spam'
+        target = discord.utils.get(guild.text_channels, name="spam")
         
-        # Ưu tiên 1: Tên chính xác là 'spam'
-        for ch in guild.text_channels:
-            if ch.name == "spam":
-                target_channel = ch
-                break
-        
-        # Ưu tiên 2: Tên chứa chữ 'spam' (vd: chat-spam)
-        if not target_channel:
-            for ch in guild.text_channels:
-                if "spam" in ch.name.lower():
-                    target_channel = ch
-                    break
-        
-        # Ưu tiên 3: Tên là 'chat' hoặc 'general' (Chống cháy)
-        if not target_channel:
-             for ch in guild.text_channels:
-                if ch.name in ["chat", "general", "chat-tong-hop"]:
-                    target_channel = ch
-                    break
+        # Nếu không có, tìm tên chứa 'spam'
+        if not target:
+            target = next((c for c in guild.text_channels if 'spam' in c.name.lower()), None)
+            
+        # Nếu không có, tìm 'chat' hoặc 'general'
+        if not target:
+             target = next((c for c in guild.text_channels if c.name in ['chat', 'general', 'chat-tong-hop']), None)
 
-        if target_channel:
-            # print(f"🔍 [Scanner] Found channel '{target_channel.name}' in '{guild.name}'", flush=True)
-            channel_cache[guild_id] = target_channel.id
-            return target_channel.id
-
+        if target:
+            channel_cache[guild_id] = target.id
+            return target.id
     return None
 
 def run_spam_group_logic(group_id):
-    print(f"🚀 [Group {group_id}] Bắt đầu chạy...", flush=True)
-    
-    DELAY_BETWEEN_PAIRS = 2.0
-    DELAY_WITHIN_PAIR = 1.0
+    print(f"🚀 [Group {group_id}] STARTED", flush=True)
+    DELAY_BETWEEN_CHUNKS = 1.5
     MAX_THREADS = 4
 
     while True:
         group = spam_groups.get(group_id)
-        # Nếu nhóm bị xóa hoặc tắt -> Dừng
         if not group or not group.get('active'):
-            print(f"🛑 [Group {group_id}] Đã dừng.", flush=True)
+            print(f"🛑 [Group {group_id}] STOPPED", flush=True)
             break
 
         target_servers = group.get('servers', [])
         target_bots = group.get('bots', [])
         message = group.get('message', "")
 
-        # Nếu cấu hình chưa đủ -> Chờ
         if not target_servers or not target_bots or not message:
-            time.sleep(2)
-            continue
+            time.sleep(2); continue
+
+        # Chia server thành các nhóm nhỏ (Batch)
+        server_chunks = [target_servers[i:i + 2] for i in range(0, len(target_servers), 2)]
         
-        # Duyệt qua từng server để spam
-        # (Không dùng pair nữa nếu muốn chắc ăn, dùng từng cái 1 cho ổn định)
-        # Nhưng để nhanh, ta vẫn dùng batch nhỏ
-        
-        chunks = [target_servers[i:i + 2] for i in range(0, len(target_servers), 2)]
-        
-        for pair in chunks:
+        for chunk in server_chunks:
             if not group.get('active'): break
             
-            valid_tasks = []
-            
-            # 1. Tìm kênh spam cho cặp server này
-            for s_id in pair:
+            # Tìm kênh cho batch này
+            valid_destinations = []
+            for s_id in chunk:
                 c_id = resolve_spam_channel(target_bots, s_id)
-                if c_id:
-                    valid_tasks.append(c_id)
-                else:
-                    # Nếu không tìm thấy kênh, thử clear cache để lần sau tìm lại
-                    if str(s_id) in channel_cache: del channel_cache[str(s_id)]
-
-            if not valid_tasks:
-                continue
-
-            # 2. Chia bot ra để bắn
-            bot_chunks = [target_bots[i:i + MAX_THREADS] for i in range(0, len(target_bots), MAX_THREADS)]
+                if c_id: valid_destinations.append(c_id)
             
-            threads = []
-            for b_chunk in bot_chunks:
-                def spam_task(bots=b_chunk, channels=valid_tasks):
+            if not valid_destinations: continue
+
+            # Chia bot chạy song song
+            bot_threads_list = []
+            bot_subgroups = [target_bots[i:i + MAX_THREADS] for i in range(0, len(target_bots), MAX_THREADS)]
+            
+            for b_grp in bot_subgroups:
+                def _spam_task(bots=b_grp, channels=valid_destinations):
                     for ch_id in channels:
                         for b_idx in bots:
                             send_message_from_sync(b_idx, ch_id, message)
-                            time.sleep(0.05) # Delay cực nhỏ giữa các bot
-                        time.sleep(DELAY_WITHIN_PAIR) # Delay giữa các server
-
-                t = threading.Thread(target=spam_task)
-                threads.append(t)
+                            time.sleep(0.05)
+                
+                t = threading.Thread(target=_spam_task)
+                bot_threads_list.append(t)
                 t.start()
             
-            for t in threads: t.join()
-            time.sleep(DELAY_BETWEEN_PAIRS)
+            for t in bot_threads_list: t.join()
+            time.sleep(DELAY_BETWEEN_CHUNKS)
 
-# --- 3. QUÉT FOLDER (TÁCH BIỆT ĐỂ REFRESH ĐƯỢC) ---
+# --- 3. QUÉT FOLDER (BOT 1) ---
 async def scan_discord_structure(bot):
-    """Hàm này chạy trong Event Loop của Bot 1"""
-    print(f"📡 [Scanner] Đang quét lại dữ liệu từ Discord...", flush=True)
-    
+    print("📡 [Scanner] Đang đồng bộ dữ liệu Folder...", flush=True)
     temp_servers = {}
-    # Lấy list server cơ bản
-    for guild in bot.guilds:
-        icon = str(guild.icon.url) if guild.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
-        temp_servers[str(guild.id)] = {'id': str(guild.id), 'name': guild.name, 'icon': icon}
+    for g in bot.guilds:
+        icon = str(g.icon.url) if g.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
+        temp_servers[str(g.id)] = {'id': str(g.id), 'name': g.name, 'icon': icon}
 
-    # Lấy folder từ User Settings
     try:
-        user_settings = await bot.http.request(discord.http.Route('GET', '/users/@me/settings'))
-        guild_folders = user_settings.get('guild_folders', [])
-        
-        folders_structure = []
+        settings = await bot.http.request(discord.http.Route('GET', '/users/@me/settings'))
+        folders = settings.get('guild_folders', [])
+        final_structure = []
         scanned_ids = []
 
-        for folder in guild_folders:
-            folder_id = str(folder.get('id', 'unknown'))
-            # Nếu folder id là None -> Nó là mục "Server Lẻ" của Discord nhưng chưa chắc
-            if folder_id == 'None': continue
-
-            folder_name = folder.get('name') or f"Folder {folder_id[:4]}"
-            guild_ids = [str(gid) for gid in folder.get('guild_ids', [])]
+        for f in folders:
+            fid = str(f.get('id') or 'unknown')
+            if fid == 'None': continue 
+            fname = f.get('name') or f"Folder {fid[:4]}"
+            gids = [str(x) for x in f.get('guild_ids', [])]
             
-            folder_servers = []
-            for gid in guild_ids:
-                if gid in temp_servers:
-                    folder_servers.append(temp_servers[gid])
-                    scanned_ids.append(gid)
+            sv_list = [temp_servers[gid] for gid in gids if gid in temp_servers]
+            scanned_ids.extend([s['id'] for s in sv_list])
             
-            if folder_servers:
-                folders_structure.append({'id': folder_id, 'name': folder_name, 'servers': folder_servers})
+            if sv_list:
+                final_structure.append({'id': fid, 'name': fname, 'servers': sv_list})
 
-        # Xử lý server lẻ (chưa vào folder nào)
-        uncategorized = [s for gid, s in temp_servers.items() if gid not in scanned_ids]
+        uncategorized = [s for k,s in temp_servers.items() if k not in scanned_ids]
         if uncategorized:
-            folders_structure.append({'id': 'root', 'name': 'Server Lẻ (Chưa xếp)', 'servers': uncategorized})
+            final_structure.append({'id': 'root', 'name': 'Server Lẻ', 'servers': uncategorized})
 
-        # Cập nhật Global Data
-        scanned_data['folders'] = folders_structure
+        scanned_data['folders'] = final_structure
         scanned_data['servers'] = temp_servers
-        print(f"✨ [Scanner] Hoàn tất: {len(folders_structure)} Folder, {len(temp_servers)} Server.", flush=True)
-        return True
+        print(f"✨ [Scanner] Xong: {len(final_structure)} thư mục.", flush=True)
     except Exception as e:
-        print(f"⚠️ [Scanner] Lỗi: {e}", flush=True)
-        # Fallback
+        print(f"⚠️ [Scanner] Lỗi: {e}")
         scanned_data['folders'] = [{'id': 'all', 'name': 'All Servers', 'servers': list(temp_servers.values())}]
         scanned_data['servers'] = temp_servers
-        return False
 
-# --- LOGIC KHỞI ĐỘNG BOT ---
 def start_bot_node(token, index):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -280,287 +218,241 @@ def start_bot_node(token, index):
 
     @bot.event
     async def on_ready():
-        print(f"✅ Bot {index+1}: {bot.user.name} Online!", flush=True)
-        bots_instances[index] = {
-            'client': bot, 'loop': loop, 'name': bot.user.name, 'id': bot.user.id
-        }
-        
-        # Chỉ Bot 1 tự động quét lúc đầu
+        print(f"✅ Bot {index+1}: {bot.user.name} Ready!", flush=True)
+        bots_instances[index] = {'client': bot, 'loop': loop, 'name': bot.user.name}
         if index == 0:
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
             await scan_discord_structure(bot)
 
-    try:
-        loop.run_until_complete(bot.start(token.strip()))
-    except Exception as e:
-        print(f"❌ Bot {index+1} lỗi: {e}")
+    try: loop.run_until_complete(bot.start(token.strip()))
+    except: pass
 
-# --- GIAO DIỆN WEB (FIX REFRESH BUTTON) ---
+# --- GIAO DIỆN (FIX CHECKBOX PERSISTENCE) ---
 HTML = """
 <!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPAM PRO V8</title>
+    <title>SPAM TOOL V9 - PERFECTED</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { background: #0f0f0f; color: #f0f0f0; font-family: 'Segoe UI', monospace; margin: 0; padding: 20px; font-size: 14px;}
-        .header { text-align: center; border-bottom: 2px solid #00ff41; padding-bottom: 10px; margin-bottom: 20px; }
-        .header h1 { color: #00ff41; margin: 0; text-transform: uppercase; }
-        
-        .main-container { display: flex; gap: 20px; align-items: flex-start; }
-        .sidebar { width: 300px; background: #1a1a1a; padding: 20px; border-radius: 8px; border: 1px solid #333; }
+        body { background: #0f0f0f; color: #ccc; font-family: 'Segoe UI', monospace; margin: 0; padding: 20px; font-size: 14px;}
+        .container { display: flex; gap: 20px; }
+        .sidebar { width: 300px; background: #1a1a1a; padding: 15px; border-radius: 8px; border: 1px solid #333; }
+        .main { flex: 1; display: flex; flex-direction: column; gap: 15px; }
         
         .btn { width: 100%; padding: 10px; border: none; font-weight: bold; cursor: pointer; border-radius: 4px; margin-top: 5px; color: #000; }
-        .btn-create { background: #00ff41; }
-        .btn-refresh { background: #333; color: #fff; margin-top: 20px; border: 1px solid #555; }
-        .btn-refresh:hover { background: #444; border-color: #fff; }
+        .btn-green { background: #00ff41; }
+        .btn-refresh { background: #333; color: #fff; border: 1px solid #555; margin-top: 20px; }
+        .btn-refresh:hover { background: #555; }
         
         input[type="text"] { width: 100%; padding: 8px; background: #000; border: 1px solid #444; color: #fff; margin-bottom: 10px; box-sizing: border-box; }
         
-        .groups-area { flex: 1; display: flex; flex-direction: column; gap: 20px; }
-        .panel-card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 15px; position: relative; }
-        .panel-card.active { border-color: #00ff41; box-shadow: 0 0 10px rgba(0, 255, 65, 0.1); }
+        .panel { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 15px; }
+        .panel.active { border-color: #00ff41; box-shadow: 0 0 8px rgba(0, 255, 65, 0.1); }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 10px; }
+        .badge { padding: 2px 6px; font-size: 0.8em; border-radius: 4px; margin-left: 10px; }
         
-        .panel-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 15px; }
-        .badge { padding: 2px 6px; font-size: 0.8em; border-radius: 4px; margin-left: 10px; font-weight: bold; }
+        .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 15px; margin-bottom: 10px; }
+        .box { height: 300px; overflow-y: auto; background: #050505; border: 1px solid #333; padding: 5px; }
         
-        .config-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 15px; margin-bottom: 15px; }
+        /* FOLDER STYLING */
+        .folder { margin-bottom: 5px; border: 1px solid #222; border-radius: 4px; overflow: hidden; }
+        .folder-head { background: #222; padding: 8px; cursor: pointer; display: flex; align-items: center; font-weight: bold; color: #aaa; }
+        .folder-head:hover { background: #2a2a2a; color: #fff; }
+        .folder-head input { margin-right: 10px; transform: scale(1.2); cursor: pointer; }
+        .folder-body { display: none; background: #111; }
+        .folder-body.open { display: block; }
         
-        /* FOLDER UI */
-        .list-box { height: 350px; overflow-y: auto; background: #050505; border: 1px solid #333; padding: 5px; }
-        .folder-group { margin-bottom: 10px; border: 1px solid #333; border-radius: 4px; overflow: hidden; }
-        .folder-header { background: #222; padding: 8px; cursor: pointer; display: flex; align-items: center; font-weight: bold; color: #aaa; border-bottom: 1px solid #333; }
-        .folder-header:hover { color: #fff; background: #333; }
-        .folder-header input { margin-right: 10px; transform: scale(1.2); }
-        .folder-content { padding: 5px; background: #111; display: none; }
-        .folder-content.open { display: block; }
+        .item { display: flex; align-items: center; padding: 5px 10px; border-bottom: 1px solid #222; color: #888; }
+        .item:hover { background: #151515; color: #fff; }
+        .item input { margin-right: 10px; }
         
-        .server-item { display: flex; align-items: center; padding: 5px 10px; border-bottom: 1px solid #222; color: #ccc; }
-        .server-item:hover { color: #00ff41; background: #1a1a1a; }
-        .server-item input { margin-right: 10px; }
-
-        .bot-item { display: flex; align-items: center; padding: 5px; border-bottom: 1px solid #222; }
-        
-        textarea { width: 100%; background: #050505; border: 1px solid #333; color: #00ff41; padding: 10px; resize: vertical; margin-bottom: 10px; box-sizing: border-box; min-height: 60px;}
-        
-        .action-bar { display: flex; gap: 10px; justify-content: flex-end; border-top: 1px solid #333; padding-top: 10px; }
-        .btn-sm { width: auto; padding: 8px 15px; color: #fff; background: #333; }
+        textarea { width: 100%; background: #000; border: 1px solid #333; color: #00ff41; padding: 10px; resize: vertical; min-height: 60px; box-sizing: border-box;}
+        .actions { display: flex; gap: 10px; justify-content: flex-end; border-top: 1px solid #333; padding-top: 10px; }
+        .btn-sm { width: auto; padding: 6px 15px; color: #fff; background: #333; }
         .btn-start { background: #00ff41; color: #000; }
         .btn-stop { background: #ff3333; color: #fff; }
     </style>
 </head>
 <body>
-    <div class="header"><h1><i class="fas fa-satellite-dish"></i> SPAM PRO V8 - FINAL FIXED</h1></div>
+    <div style="text-align:center; margin-bottom:20px; border-bottom:2px solid #00ff41; padding-bottom:10px;">
+        <h1 style="margin:0; color:#00ff41;">SPAM TOOL V9 (FIXED)</h1>
+    </div>
     
-    <div class="main-container">
+    <div class="container">
         <div class="sidebar">
-            <h3>Tạo Panel Mới</h3>
-            <input type="text" id="groupName" placeholder="Tên nhóm...">
-            <button class="btn btn-create" onclick="createGroup()">+ TẠO NHÓM</button>
+            <h3>Tạo Panel</h3>
+            <input type="text" id="gName" placeholder="Tên nhóm...">
+            <button class="btn btn-green" onclick="create()">+ TẠO</button>
             
-            <button class="btn btn-refresh" onclick="refreshData()" id="refreshBtn">
-                <i class="fas fa-sync"></i> QUÉT LẠI SERVER (BOT 1)
-            </button>
-            <div id="refresh-status" style="text-align:center; margin-top:5px; font-size:0.8em; color:#888;"></div>
-
-            <div style="margin-top:20px; font-size:0.9em; color:#888;">
-                Bot Online: <b style="color:#fff">{{ bot_count }}</b><br>
-                Servers: <b style="color:#fff">{{ server_count }}</b><br>
-                <br>
-                <i class="fas fa-cloud"></i> JSONBin: 
-                <b style="color:{{ 'lime' if has_jsonbin else 'red' }}">{{ 'CONNECTED' if has_jsonbin else 'MISSING' }}</b>
+            <button class="btn btn-refresh" onclick="refresh()" id="rfBtn"><i class="fas fa-sync"></i> QUÉT LẠI SERVER</button>
+            <div id="rfStatus" style="text-align:center; font-size:0.8em; color:#666; margin-top:5px;"></div>
+            
+            <div style="margin-top:20px; font-size:0.9em; color:#666;">
+                Bots: <b style="color:#fff">{{ bot_count }}</b> | Servers: <b style="color:#fff">{{ server_count }}</b>
             </div>
         </div>
-        <div id="groupsList" class="groups-area"></div>
+        <div id="list" class="main"></div>
     </div>
 
     <script>
         const bots = {{ bots_json|safe }};
-        const folderData = {{ folders_json|safe }};
+        const folders = {{ folders_json|safe }};
 
-        function createPanelHTML(id, grp) {
-            let botChecks = bots.map(b => 
-                `<label class="bot-item"><input type="checkbox" value="${b.index}" ${grp.bots.includes(b.index)?'checked':''}> Bot ${b.index+1}: ${b.name}</label>`
+        function render(data) {
+            const list = document.getElementById('list');
+            const ids = Object.keys(data);
+            Array.from(list.children).forEach(c => { if(!ids.includes(c.id.substring(6))) c.remove(); });
+
+            for (const [id, grp] of Object.entries(data)) {
+                let el = document.getElementById(`panel-${id}`);
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = `panel-${id}`;
+                    el.className = 'panel';
+                    el.innerHTML = buildHTML(id, grp);
+                    list.appendChild(el);
+                } else {
+                    // Update dynamic parts if needed, but avoiding full re-render to keep open folders open
+                    updateStatus(id, grp);
+                }
+            }
+        }
+
+        function buildHTML(id, grp) {
+            // Bots HTML
+            let bHtml = bots.map(b => 
+                `<label class="item"><input type="checkbox" value="${b.index}" ${grp.bots.includes(b.index)?'checked':''}> Bot ${b.index+1}: ${b.name}</label>`
             ).join('');
 
-            let folderHtml = '';
-            if (folderData.length === 0) {
-                folderHtml = '<div style="padding:20px; text-align:center; color:#666">Chưa có dữ liệu.<br>Bấm nút "QUÉT LẠI SERVER" bên trái.</div>';
-            } else {
-                folderData.forEach(folder => {
-                    let serverHtml = '';
-                    folder.servers.forEach(s => {
-                        const checked = grp.servers.includes(s.id) ? 'checked' : '';
-                        serverHtml += `<label class="server-item"><input type="checkbox" class="sv-cb-${id}" data-folder="${folder.id}" value="${s.id}" ${checked}> ${s.name}</label>`;
+            // Folders HTML with CHECK LOGIC FIX
+            let fHtml = '';
+            if (folders.length === 0) fHtml = '<div style="padding:20px; text-align:center;">Chưa có dữ liệu server. Hãy bấm Quét Lại.</div>';
+            else {
+                folders.forEach(f => {
+                    // --- LOGIC FIX: Kiểm tra xem folder có nên được tích hay không ---
+                    let totalSv = f.servers.length;
+                    let checkedSv = 0;
+                    let sHtml = '';
+                    
+                    f.servers.forEach(s => {
+                        const isChecked = grp.servers.includes(s.id);
+                        if(isChecked) checkedSv++;
+                        sHtml += `<label class="item"><input type="checkbox" class="sc-${id}-${f.id}" value="${s.id}" ${isChecked?'checked':''}> ${s.name}</label>`;
                     });
 
-                    folderHtml += `
-                    <div class="folder-group">
-                        <div class="folder-header" onclick="toggleFolderContent(this)">
-                            <input type="checkbox" onclick="toggleFolderAll('${id}', '${folder.id}', this); event.stopPropagation();"> 
-                            <i class="fas fa-folder" style="margin-right:8px; color:#ffd700"></i> ${folder.name} (${folder.servers.length})
+                    // Nếu tất cả server trong folder đều được chọn -> Tích vào folder cha
+                    const folderChecked = (totalSv > 0 && totalSv === checkedSv) ? 'checked' : '';
+                    
+                    fHtml += `
+                    <div class="folder">
+                        <div class="folder-head" onclick="toggleBody(this)">
+                            <input type="checkbox" ${folderChecked} onclick="checkAll('${id}', '${f.id}', this); event.stopPropagation();">
+                            <i class="fas fa-folder" style="margin-right:8px; color:#ffd700"></i> ${f.name} (${totalSv})
                         </div>
-                        <div class="folder-content">${serverHtml}</div>
+                        <div class="folder-body">${sHtml}</div>
                     </div>`;
                 });
             }
 
             return `
-                <div class="panel-card" id="panel-${id}">
-                    <div class="panel-header">
-                        <div class="panel-title">${grp.name} <span id="badge-${id}" class="badge">IDLE</span></div>
-                        <button class="btn btn-sm" style="background:#ff3333" onclick="deleteGroup('${id}')"><i class="fas fa-trash"></i></button>
-                    </div>
-                    <div class="config-grid">
-                        <div>
-                            <div style="font-weight:bold; color:#00ff41; margin-bottom:5px;">CHỌN BOT</div>
-                            <div class="list-box" id="bots-${id}">${botChecks}</div>
-                        </div>
-                        <div>
-                            <div style="font-weight:bold; color:#00ff41; margin-bottom:5px;">CHỌN SERVER THEO FOLDER</div>
-                            <div class="list-box" id="servers-${id}">${folderHtml}</div>
-                        </div>
-                    </div>
-                    <textarea id="msg-${id}" placeholder="Nội dung spam...">${grp.message || ''}</textarea>
-                    <div class="action-bar">
-                        <button class="btn btn-sm" onclick="saveGroup('${id}')">LƯU CẤU HÌNH</button>
-                        <span id="btn-area-${id}"></span>
-                    </div>
+                <div class="header">
+                    <div style="font-weight:bold; font-size:1.1em; color:#fff">${grp.name} <span id="st-${id}" class="badge"></span></div>
+                    <button class="btn-sm" style="background:#ff3333" onclick="del('${id}')"><i class="fas fa-trash"></i></button>
+                </div>
+                <div class="grid">
+                    <div><div style="color:#00ff41; margin-bottom:5px; font-weight:bold">BOTS</div><div class="box" id="b-${id}">${bHtml}</div></div>
+                    <div><div style="color:#00ff41; margin-bottom:5px; font-weight:bold">FOLDERS</div><div class="box" id="s-${id}">${fHtml}</div></div>
+                </div>
+                <textarea id="m-${id}" placeholder="Nội dung spam...">${grp.message || ''}</textarea>
+                <div class="actions">
+                    <button class="btn-sm" onclick="save('${id}')">LƯU CONFIG</button>
+                    <span id="act-${id}"></span>
                 </div>
             `;
         }
 
-        function toggleFolderContent(header) { header.nextElementSibling.classList.toggle('open'); }
-        function toggleFolderAll(panelId, folderId, masterCb) {
-            document.querySelectorAll(`.sv-cb-${panelId}[data-folder="${folderId}"]`).forEach(cb => cb.checked = masterCb.checked);
-        }
-
-        function refreshData() {
-            const btn = document.getElementById('refreshBtn');
-            const status = document.getElementById('refresh-status');
-            btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ĐANG QUÉT...';
-            status.innerText = "Đang gửi lệnh quét cho Bot 1...";
+        function updateStatus(id, grp) {
+            const p = document.getElementById(`panel-${id}`);
+            if(grp.active) p.classList.add('active'); else p.classList.remove('active');
             
-            fetch('/api/refresh_data').then(r => r.json()).then(d => {
-                if(d.status === 'ok') {
-                    status.innerText = "Đã gửi lệnh. Đang đợi dữ liệu...";
-                    setTimeout(() => location.reload(), 4000); // F5 sau 4s
-                } else {
-                    alert("Lỗi: " + d.msg);
-                    btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync"></i> QUÉT LẠI SERVER';
-                }
+            const badge = document.getElementById(`st-${id}`);
+            badge.innerText = grp.active ? 'RUNNING' : 'IDLE';
+            badge.style.background = grp.active ? '#00ff41' : '#333';
+            badge.style.color = grp.active ? '#000' : '#fff';
+
+            const act = document.getElementById(`act-${id}`);
+            act.innerHTML = grp.active 
+                ? `<button class="btn-sm btn-stop" onclick="toggle('${id}')">DỪNG</button>` 
+                : `<button class="btn-sm btn-start" onclick="toggle('${id}')">BẮT ĐẦU</button>`;
+        }
+
+        function toggleBody(el) { el.nextElementSibling.classList.toggle('open'); }
+        function checkAll(pid, fid, cb) {
+            document.querySelectorAll(`.sc-${pid}-${fid}`).forEach(c => c.checked = cb.checked);
+        }
+
+        // API CALLS
+        function api(ep, body) { return fetch(`/api/${ep}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(r=>r.json()); }
+        function loop() { fetch('/api/groups').then(r=>r.json()).then(render); }
+        
+        function create() { const n=document.getElementById('gName').value; if(n) api('create', {name:n}).then(()=>{document.getElementById('gName').value=''; loop()}); }
+        function save(id) {
+            const msg = document.getElementById(`m-${id}`).value;
+            const bots = Array.from(document.getElementById(`b-${id}`).querySelectorAll('input:checked')).map(c=>parseInt(c.value));
+            // Gom tất cả server đã check từ tất cả folder
+            const svrs = [];
+            document.getElementById(`s-${id}`).querySelectorAll('input[type="checkbox"]:not([onclick])').forEach(c => {
+                if(c.checked) svrs.push(c.value);
+            });
+            api('update', {id, message:msg, bots, servers:svrs}).then(d=>alert(d.msg));
+        }
+        function toggle(id) { api('toggle', {id}).then(()=>setTimeout(loop, 200)); }
+        function del(id) { if(confirm('Xóa?')) api('delete', {id}).then(loop); }
+        function refresh() {
+            document.getElementById('rfBtn').disabled = true;
+            document.getElementById('rfStatus').innerText = "Đang gửi lệnh quét...";
+            fetch('/api/refresh').then(r=>r.json()).then(d=>{
+                if(d.ok) { document.getElementById('rfStatus').innerText = "Đang tải lại trang..."; setTimeout(()=>location.reload(), 4000); }
+                else { alert(d.msg); document.getElementById('rfBtn').disabled = false; }
             });
         }
 
-        function renderGroups() {
-            fetch('/api/groups').then(r => r.json()).then(data => {
-                const container = document.getElementById('groupsList');
-                const currentIds = Object.keys(data);
-                Array.from(container.children).forEach(child => { if (!currentIds.includes(child.id.replace('panel-', ''))) child.remove(); });
-                for (const [id, grp] of Object.entries(data)) {
-                    let panel = document.getElementById(`panel-${id}`);
-                    if (!panel) {
-                        const div = document.createElement('div');
-                        div.innerHTML = createPanelHTML(id, grp);
-                        container.appendChild(div.firstElementChild);
-                        panel = document.getElementById(`panel-${id}`);
-                    }
-                    if (grp.active) panel.classList.add('active'); else panel.classList.remove('active');
-                    const badge = document.getElementById(`badge-${id}`);
-                    badge.innerText = grp.active ? 'RUNNING' : 'STOPPED';
-                    badge.style.background = grp.active ? '#00ff41' : '#333';
-                    const btnArea = document.getElementById(`btn-area-${id}`);
-                    btnArea.innerHTML = grp.active 
-                        ? `<button class="btn btn-sm btn-stop" onclick="toggleGroup('${id}')">DỪNG LẠI</button>` 
-                        : `<button class="btn btn-sm btn-start" onclick="toggleGroup('${id}')">BẮT ĐẦU</button>`;
-                }
-            });
-        }
-        
-        function createGroup() { const name = document.getElementById('groupName').value; if(name) fetch('/api/create', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name}) }).then(() => { document.getElementById('groupName').value = ''; renderGroups(); }); }
-        function saveGroup(id) { 
-            const msg = document.getElementById(`msg-${id}`).value; 
-            const bots = Array.from(document.querySelectorAll(`#bots-${id} input:checked`)).map(c => parseInt(c.value)); 
-            const servers = Array.from(document.querySelectorAll(`#servers-${id} input:checked`)).map(c => c.value); 
-            fetch('/api/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id, message: msg, bots, servers}) }).then(r => r.json()).then(d => alert(d.msg)); 
-        }
-        function toggleGroup(id) { fetch('/api/toggle', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) }).then(() => setTimeout(renderGroups, 200)); }
-        function deleteGroup(id) { if(confirm('Xóa?')) fetch('/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) }).then(() => renderGroups()); }
-        renderGroups(); setInterval(renderGroups, 3000);
+        loop(); setInterval(loop, 3000);
     </script>
 </body>
 </html>
 """
 
-# --- API ---
 @app.route('/')
 def index():
-    bots_list = [{'index': k, 'name': v['name']} for k, v in bots_instances.items()]
-    has_jsonbin = bool(JSONBIN_API_KEY and JSONBIN_BIN_ID)
-    return render_template_string(HTML, 
-        bots_json=bots_list, 
-        folders_json=scanned_data['folders'], 
-        bot_count=len(bots_instances), 
-        server_count=len(scanned_data['servers']),
-        has_jsonbin=has_jsonbin
-    )
-
-@app.route('/api/refresh_data')
-def api_refresh():
-    # Tìm Bot 1
-    bot_data = bots_instances.get(0) # Index 0 là Bot 1
-    if not bot_data:
-        return jsonify({'status': 'error', 'msg': 'Bot 1 chưa Online!'})
-    
-    # Gửi lệnh quét vào Loop của Bot 1
-    asyncio.run_coroutine_threadsafe(scan_discord_structure(bot_data['client']), bot_data['loop'])
-    return jsonify({'status': 'ok', 'msg': 'Đang quét...'})
+    bl = [{'index': k, 'name': v['name']} for k, v in bots_instances.items()]
+    return render_template_string(HTML, bots_json=bl, folders_json=scanned_data['folders'], bot_count=len(bots_instances), server_count=len(scanned_data['servers']))
 
 @app.route('/api/groups')
-def get_groups(): return jsonify(spam_groups)
-
+def g_groups(): return jsonify(spam_groups)
 @app.route('/api/create', methods=['POST'])
-def create_grp(): 
-    gid = str(uuid.uuid4())[:6]
-    spam_groups[gid] = {'name': request.json.get('name'), 'active': False, 'bots': [], 'servers': [], 'message': ''}
-    save_settings() # Lưu ngay khi tạo
-    return jsonify({'status': 'ok'})
-
+def g_create(): gid=str(uuid.uuid4())[:6]; spam_groups[gid]={'name':request.json['name'],'active':False,'bots':[],'servers':[],'message':''}; save_settings(); return jsonify({})
 @app.route('/api/update', methods=['POST'])
-def update_grp(): 
-    d = request.json
-    if d['id'] in spam_groups:
-        spam_groups[d['id']].update({'bots': d['bots'], 'servers': d['servers'], 'message': d['message']})
-        save_settings() # Lưu ngay khi sửa
-    return jsonify({'status': 'ok', 'msg': '✅ Config Saved!'})
-
+def g_update(): d=request.json; spam_groups[d['id']].update({'bots':d['bots'],'servers':d['servers'],'message':d['message']}); save_settings(); return jsonify({'msg':'Đã lưu!'})
 @app.route('/api/toggle', methods=['POST'])
-def toggle_grp(): 
-    gid = request.json['id']
-    if gid in spam_groups:
-        curr = spam_groups[gid]['active']
-        spam_groups[gid]['active'] = not curr
-        if not curr: threading.Thread(target=run_spam_group_logic, args=(gid,), daemon=True).start()
-    return jsonify({'status': 'ok'})
-
+def g_toggle(): 
+    gid=request.json['id']; cur=spam_groups[gid]['active']; spam_groups[gid]['active']=not cur; 
+    if not cur: threading.Thread(target=run_spam_group_logic, args=(gid,), daemon=True).start()
+    return jsonify({})
 @app.route('/api/delete', methods=['POST'])
-def del_grp(): 
-    gid = request.json['id']
-    if gid in spam_groups:
-        spam_groups[gid]['active'] = False
-        del spam_groups[gid]
-        save_settings() # Lưu ngay khi xóa
-    return jsonify({'status': 'ok'})
+def g_del(): gid=request.json['id']; spam_groups[gid]['active']=False; del spam_groups[gid]; save_settings(); return jsonify({})
+@app.route('/api/refresh')
+def g_refresh():
+    b1 = bots_instances.get(0)
+    if b1: asyncio.run_coroutine_threadsafe(scan_discord_structure(b1['client']), b1['loop']); return jsonify({'ok':True})
+    return jsonify({'ok':False, 'msg':'Bot 1 chưa online'})
 
 if __name__ == '__main__':
-    print("🔥 SYSTEM STARTING... (V8 - FINAL FIXED)", flush=True)
-    load_settings() # Tải config cũ
-
+    print("🔥 V9 STARTED - FIXED UI & SPAM", flush=True)
+    load_settings()
     for i, t in enumerate(TOKENS):
         if t.strip(): threading.Thread(target=start_bot_node, args=(t, i), daemon=True).start(); time.sleep(1)
-    
-    port = int(os.environ.get("PORT", 10000))
-    print(f"🌍 WEB PANEL: http://0.0.0.0:{port}")
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
