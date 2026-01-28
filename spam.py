@@ -122,7 +122,37 @@ def run_spam_group_logic(group_id):
         time.sleep(DELAY_BETWEEN_PAIRS)
         server_pair_index += 1
 
-# --- CƠ CHẾ QUÉT SERVER (MỚI - GIỐNG SHARED.PY) ---
+# --- CƠ CHẾ QUÉT SERVER (V4: BACKGROUND SCANNER) ---
+# Cơ chế này đảm bảo 100% quét ra server dù mạng chậm hay 92+ server
+async def background_server_scanner(bot, index):
+    print(f"📡 [Bot {index+1}] Bắt đầu luồng quét server ngầm...", flush=True)
+    await bot.wait_until_ready()
+    
+    while not bot.is_closed():
+        try:
+            # Nếu bot chưa load xong guild, nó sẽ trả về list rỗng
+            # Vòng lặp sẽ tiếp tục chạy cho đến khi list có dữ liệu
+            found_count = 0
+            current_guilds = list(bot.guilds) # Copy ra list để tránh lỗi runtime
+            
+            for guild in current_guilds:
+                if str(guild.id) not in scanned_servers:
+                    scanned_servers[str(guild.id)] = {
+                        'name': guild.name,
+                        'icon': str(guild.icon_url)
+                    }
+                    found_count += 1
+            
+            # Chỉ log khi tìm thấy mới để đỡ spam console
+            if found_count > 0:
+                print(f"✨ [Bot {index+1}] Đã cập nhật thêm {found_count} server mới. Tổng: {len(scanned_servers)}", flush=True)
+                
+        except Exception as e:
+            print(f"⚠️ [Bot {index+1}] Scanner Error: {e}")
+            
+        # Nghỉ 10 giây rồi quét lại. Đảm bảo server mới join cũng sẽ hiện.
+        await asyncio.sleep(10)
+
 def start_bot_node(token, index):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -130,39 +160,26 @@ def start_bot_node(token, index):
 
     @bot.event
     async def on_ready():
-        print(f"✅ Bot {index+1}: {bot.user.name} Online!", flush=True)
+        print(f"✅ Bot {index+1}: {bot.user.name} Connected!", flush=True)
         bots_instances[index] = {
             'client': bot, 'loop': loop, 'name': bot.user.name, 'id': bot.user.id
         }
-        
-        # MỖI BOT ĐỀU TỰ BÁO CÁO SERVER CỦA NÓ VÀO RỔ CHUNG
-        # Không chờ Bot 1 nữa, ai có server nấy góp
-        await asyncio.sleep(3) # Đợi discord load cache
-        count = 0
-        for guild in bot.guilds:
-            if str(guild.id) not in scanned_servers:
-                scanned_servers[str(guild.id)] = {
-                    'name': guild.name,
-                    'icon': str(guild.icon_url)
-                }
-                count += 1
-        
-        if count > 0:
-            print(f"📥 Bot {index+1} đã đóng góp {count} server mới vào danh sách.", flush=True)
+        # Kích hoạt Scanner chạy ngầm
+        bot.loop.create_task(background_server_scanner(bot, index))
 
     try:
         loop.run_until_complete(bot.start(token.strip()))
     except Exception as e:
-        print(f"❌ Bot {index+1} lỗi: {e}")
+        print(f"❌ Bot {index+1} lỗi login: {e}")
 
-# --- GIAO DIỆN WEB (ĐÃ SỬA LỖI HIỂN THỊ) ---
+# --- GIAO DIỆN WEB ---
 HTML = """
 <!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MULTI-PANEL SPAM TOOL V3</title>
+    <title>MULTI-PANEL SPAM TOOL V4</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { background: #0f0f0f; color: #f0f0f0; font-family: 'Consolas', monospace; margin: 0; padding: 20px; }
@@ -206,22 +223,22 @@ HTML = """
     </style>
 </head>
 <body>
-    <div class="header"><h1><i class="fas fa-network-wired"></i> Multi-Panel Spam Tool V3</h1></div>
+    <div class="header"><h1><i class="fas fa-network-wired"></i> SPAM TOOL V4 (Background Scanner)</h1></div>
     
     <div class="main-container">
         <div class="sidebar">
             <h3><i class="fas fa-layer-group"></i> Create Panel</h3>
-            <input type="text" id="groupName" placeholder="Đặt tên nhóm (VD: Raid Team 1)...">
+            <input type="text" id="groupName" placeholder="Đặt tên nhóm...">
             <button class="btn btn-create" onclick="createGroup()">TẠO NHÓM MỚI</button>
             
             <div class="stat-box">
-                <div>Bot Online: <span class="stat-val">{{ bot_count }}</span></div>
-                <div>Servers Found: <span class="stat-val">{{ server_count }}</span></div>
-                <div style="font-size: 0.8em; margin-top: 5px; color: #555;">* Server được tổng hợp từ tất cả các bot.</div>
+                <div>Bot Connected: <span class="stat-val">{{ bot_count }}</span></div>
+                <div>Servers Found: <span class="stat-val" id="sv-count">{{ server_count }}</span></div>
+                <div style="font-size: 0.8em; margin-top: 5px; color: #555;">* Server sẽ tự động cập nhật liên tục.</div>
             </div>
             
             <hr style="border-color: #333; margin: 20px 0;">
-            <button class="btn" style="background: #333; color: #aaa;" onclick="location.reload()">Refresh Data</button>
+            <button class="btn" style="background: #333; color: #aaa;" onclick="location.reload()">Refresh Page</button>
         </div>
 
         <div id="groupsList" class="groups-area"></div>
@@ -246,7 +263,7 @@ HTML = """
             // Render Server List
             let serverChecks = '';
             if (servers.length === 0) {
-                serverChecks = '<div style="padding:10px; color:#666; text-align:center;">Đang quét server...<br>Hãy đợi 1 chút rồi F5 lại trang.</div>';
+                serverChecks = '<div style="padding:10px; color:#ff3333; text-align:center;">⏳ Đang đồng bộ server...<br>Vui lòng đợi 5-10s và F5 lại.</div>';
             } else {
                 servers.forEach(s => {
                     const checked = grp.servers.includes(s.id) ? 'checked' : '';
@@ -274,18 +291,18 @@ HTML = """
                             <div class="list-box" id="bots-${id}">${botChecks}</div>
                         </div>
                         <div>
-                            <div style="margin-bottom:8px; font-weight:bold; color:#00ff41"><i class="fas fa-server"></i> CHỌN SERVER (Global List)</div>
+                            <div style="margin-bottom:8px; font-weight:bold; color:#00ff41"><i class="fas fa-server"></i> CHỌN SERVER (${servers.length})</div>
                             <div class="list-box" id="servers-${id}">${serverChecks}</div>
                         </div>
                     </div>
                     
                     <div>
                         <div style="margin-bottom:8px; font-weight:bold;"><i class="fas fa-comment-dots"></i> NỘI DUNG SPAM</div>
-                        <textarea id="msg-${id}" placeholder="Nhập nội dung spam vào đây...">${grp.message || ''}</textarea>
+                        <textarea id="msg-${id}" placeholder="Nhập nội dung spam...">${grp.message || ''}</textarea>
                     </div>
                     
                     <div class="action-bar">
-                        <button class="btn btn-save" onclick="saveGroup('${id}')"><i class="fas fa-save"></i> LƯU CẤU HÌNH</button>
+                        <button class="btn btn-save" onclick="saveGroup('${id}')"><i class="fas fa-save"></i> LƯU CONFIG</button>
                         <span id="btn-area-${id}"></span>
                     </div>
                 </div>
@@ -297,7 +314,6 @@ HTML = """
                 const container = document.getElementById('groupsList');
                 const currentIds = Object.keys(data);
                 
-                // Xóa panel cũ
                 Array.from(container.children).forEach(child => {
                     const childId = child.id.replace('panel-', '');
                     if (!currentIds.includes(childId)) child.remove();
@@ -305,8 +321,6 @@ HTML = """
 
                 for (const [id, grp] of Object.entries(data)) {
                     let panel = document.getElementById(`panel-${id}`);
-                    
-                    // Nếu chưa có thì tạo mới
                     if (!panel) {
                         const div = document.createElement('div');
                         div.innerHTML = createPanelHTML(id, grp);
@@ -314,12 +328,11 @@ HTML = """
                         panel = document.getElementById(`panel-${id}`);
                     }
 
-                    // Cập nhật trạng thái UI (Không load lại checkbox)
                     if (grp.active) panel.classList.add('active');
                     else panel.classList.remove('active');
 
                     const badge = document.getElementById(`badge-${id}`);
-                    badge.innerText = grp.active ? 'ĐANG CHẠY' : 'ĐÃ DỪNG';
+                    badge.innerText = grp.active ? 'RUNNING' : 'STOPPED';
                     badge.style.background = grp.active ? '#00ff41' : '#333';
                     badge.style.color = grp.active ? '#000' : '#fff';
 
@@ -327,7 +340,7 @@ HTML = """
                     if (grp.active) {
                         btnArea.innerHTML = `<button class="btn btn-stop" onclick="toggleGroup('${id}')"><i class="fas fa-stop"></i> DỪNG LẠI</button>`;
                     } else {
-                        btnArea.innerHTML = `<button class="btn btn-start" onclick="toggleGroup('${id}')"><i class="fas fa-play"></i> BẮT ĐẦU SPAM</button>`;
+                        btnArea.innerHTML = `<button class="btn btn-start" onclick="toggleGroup('${id}')"><i class="fas fa-play"></i> BẮT ĐẦU</button>`;
                     }
                 }
             });
@@ -335,7 +348,7 @@ HTML = """
 
         function createGroup() {
             const name = document.getElementById('groupName').value;
-            if(!name) return alert("Vui lòng nhập tên nhóm!");
+            if(!name) return alert("Nhập tên nhóm!");
             fetch('/api/create', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name}) })
             .then(() => { document.getElementById('groupName').value = ''; renderGroups(); });
         }
@@ -354,11 +367,9 @@ HTML = """
         }
 
         function deleteGroup(id) {
-            if(confirm('Bạn có chắc muốn xóa nhóm này không?')) 
-                fetch('/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) }).then(() => renderGroups());
+            if(confirm('Xóa nhóm?')) fetch('/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) }).then(() => renderGroups());
         }
 
-        // Khởi chạy
         renderGroups();
         setInterval(renderGroups, 2000);
     </script>
@@ -370,7 +381,6 @@ HTML = """
 @app.route('/')
 def index():
     bots_list = [{'index': k, 'name': v['name']} for k, v in bots_instances.items()]
-    # Sắp xếp server theo tên
     servers_sorted = sorted([{'id': k, 'name': v['name']} for k, v in scanned_servers.items()], key=lambda x: x['name'])
     return render_template_string(HTML, bots_json=bots_list, servers_json=servers_sorted, bot_count=len(bots_instances), server_count=len(scanned_servers))
 
@@ -388,7 +398,7 @@ def update_grp():
     d = request.json
     if d['id'] in spam_groups:
         spam_groups[d['id']].update({'bots': d['bots'], 'servers': d['servers'], 'message': d['message']})
-    return jsonify({'status': 'ok', 'msg': '✅ Đã lưu cấu hình!'})
+    return jsonify({'status': 'ok', 'msg': '✅ Config Saved!'})
 
 @app.route('/api/toggle', methods=['POST'])
 def toggle_grp():
@@ -407,10 +417,10 @@ def del_grp():
     return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
-    print("🔥 SYSTEM STARTING...", flush=True)
+    print("🔥 SYSTEM STARTING... (Wait for server sync)", flush=True)
     for i, t in enumerate(TOKENS):
         if t.strip(): threading.Thread(target=start_bot_node, args=(t, i), daemon=True).start(); time.sleep(1)
     
     port = int(os.environ.get("PORT", 10000))
-    print(f"🌍 WEB PANEL RUNNING: http://0.0.0.0:{port}")
+    print(f"🌍 WEB PANEL: http://0.0.0.0:{port}")
     app.run(host='0.0.0.0', port=port)
