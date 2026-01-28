@@ -14,7 +14,8 @@ TOKENS = os.getenv("TOKENS", "").split(",")
 
 if not TOKENS or TOKENS == ['']:
     print("❌ LỖI: Chưa nhập Tokens trong file .env")
-    exit()
+    # Không exit() để tránh crash container trên render, chỉ báo lỗi
+    TOKENS = []
 
 # Tắt log rác
 logging.getLogger('discord').setLevel(logging.WARNING)
@@ -122,35 +123,44 @@ def run_spam_group_logic(group_id):
         time.sleep(DELAY_BETWEEN_PAIRS)
         server_pair_index += 1
 
-# --- CƠ CHẾ QUÉT SERVER (V4: BACKGROUND SCANNER) ---
-# Cơ chế này đảm bảo 100% quét ra server dù mạng chậm hay 92+ server
+# --- CƠ CHẾ QUÉT SERVER (V4 FIX LỖI ICON) ---
 async def background_server_scanner(bot, index):
     print(f"📡 [Bot {index+1}] Bắt đầu luồng quét server ngầm...", flush=True)
     await bot.wait_until_ready()
     
     while not bot.is_closed():
         try:
-            # Nếu bot chưa load xong guild, nó sẽ trả về list rỗng
-            # Vòng lặp sẽ tiếp tục chạy cho đến khi list có dữ liệu
             found_count = 0
-            current_guilds = list(bot.guilds) # Copy ra list để tránh lỗi runtime
+            # Copy list để tránh lỗi RuntimeError khi size thay đổi
+            current_guilds = list(bot.guilds) 
             
             for guild in current_guilds:
                 if str(guild.id) not in scanned_servers:
+                    # --- FIX LỖI Ở ĐÂY: CHECK ICON AN TOÀN ---
+                    icon_link = ""
+                    if guild.icon:
+                        # Với phiên bản mới, guild.icon là Asset, cần .url
+                        # Với phiên bản cũ, nó có thể là string
+                        try:
+                            icon_link = str(guild.icon.url)
+                        except AttributeError:
+                            icon_link = str(guild.icon)
+                    else:
+                        icon_link = "https://cdn.discordapp.com/embed/avatars/0.png"
+                    
                     scanned_servers[str(guild.id)] = {
                         'name': guild.name,
-                        'icon': str(guild.icon_url)
+                        'icon': icon_link
                     }
                     found_count += 1
             
-            # Chỉ log khi tìm thấy mới để đỡ spam console
             if found_count > 0:
                 print(f"✨ [Bot {index+1}] Đã cập nhật thêm {found_count} server mới. Tổng: {len(scanned_servers)}", flush=True)
                 
         except Exception as e:
+            # In lỗi chi tiết hơn để debug nếu cần
             print(f"⚠️ [Bot {index+1}] Scanner Error: {e}")
             
-        # Nghỉ 10 giây rồi quét lại. Đảm bảo server mới join cũng sẽ hiện.
         await asyncio.sleep(10)
 
 def start_bot_node(token, index):
@@ -164,7 +174,6 @@ def start_bot_node(token, index):
         bots_instances[index] = {
             'client': bot, 'loop': loop, 'name': bot.user.name, 'id': bot.user.id
         }
-        # Kích hoạt Scanner chạy ngầm
         bot.loop.create_task(background_server_scanner(bot, index))
 
     try:
@@ -179,7 +188,7 @@ HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MULTI-PANEL SPAM TOOL V4</title>
+    <title>MULTI-PANEL SPAM TOOL V5</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { background: #0f0f0f; color: #f0f0f0; font-family: 'Consolas', monospace; margin: 0; padding: 20px; }
@@ -223,7 +232,7 @@ HTML = """
     </style>
 </head>
 <body>
-    <div class="header"><h1><i class="fas fa-network-wired"></i> SPAM TOOL V4 (Background Scanner)</h1></div>
+    <div class="header"><h1><i class="fas fa-network-wired"></i> SPAM TOOL V5 (Fixed Icon)</h1></div>
     
     <div class="main-container">
         <div class="sidebar">
