@@ -172,7 +172,7 @@ async def background_server_scanner(bot, index):
             # Chỉ thêm folder nếu có server
             if folder_servers:
                 # Nếu folder chưa có tên (thường là folder ẩn hoặc gom nhóm tạm), đặt tên
-                final_list.append({'folder_name': f"📁 {folder_name}", 'servers': folder_servers})
+                final_list.append({'folder_name': f"{folder_name}", 'servers': folder_servers})
 
         # 4. Xử lý các Server không nằm trong folder nào (Uncategorized)
         uncategorized = []
@@ -243,7 +243,7 @@ HTML = """
             --muted: #8899a6;
         }
         body { 
-            background: var(--bg); 
+            background: var(--bg);
             color: var(--text); 
             font-family: 'IBM Plex Sans', sans-serif; 
             margin: 0; 
@@ -252,7 +252,7 @@ HTML = """
             min-height: 100vh;
         }
         .header { 
-            text-align: left; 
+            text-align: left;
             border-bottom: 1px solid var(--border); 
             padding-bottom: 15px; 
             margin-bottom: 30px;
@@ -261,7 +261,7 @@ HTML = """
             gap: 15px;
         }
         .header h1 { 
-            color: var(--primary); 
+            color: var(--primary);
             margin: 0; 
             text-transform: uppercase; 
             font-size: 1.4rem; 
@@ -272,7 +272,7 @@ HTML = """
         
         .main-container { display: flex; gap: 24px; align-items: flex-start; max-width: 1600px; margin: 0 auto; }
         .sidebar { 
-            width: 320px; 
+            width: 320px;
             background: var(--card-bg); 
             padding: 20px; 
             border-radius: 12px; 
@@ -291,24 +291,24 @@ HTML = """
         }
         
         .btn { 
-            width: 100%; 
+            width: 100%;
             padding: 12px; 
             border: none; 
             font-weight: bold; 
             cursor: pointer; 
             border-radius: 8px; 
             margin-top: 10px; 
-            font-family: inherit; 
+            font-family: inherit;
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             font-size: 0.9rem;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
         .btn-create { background: var(--primary); color: #000; box-shadow: 0 4px 15px var(--primary-glow); }
-        .btn-create:hover { transform: translateY(-2px); box-shadow: 0 6px 20px var(--primary-glow); brightness: 1.1; }
+        .btn-create:hover { transform: translateY(-2px); box-shadow: 0 6px 20px var(--primary-glow); filter: brightness(1.1); }
         
         input[type="text"] { 
-            width: 100%; 
+            width: 100%;
             padding: 12px; 
             background: #000; 
             border: 1px solid var(--border); 
@@ -325,7 +325,7 @@ HTML = """
         
         .groups-area { flex: 1; display: flex; flex-direction: column; gap: 24px; }
         .panel-card { 
-            background: var(--card-bg); 
+            background: var(--card-bg);
             border: 1px solid var(--border); 
             border-radius: 12px; 
             padding: 20px; 
@@ -334,8 +334,8 @@ HTML = """
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
         }
         .panel-card.active { 
-            border-color: var(--primary); 
-            box-shadow: 0 0 20px rgba(0, 255, 65, 0.05), 0 10px 40px rgba(0,0,0,0.4); 
+            border-color: var(--primary);
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.05), 0 10px 40px rgba(0,0,0,0.4);
         }
         .panel-card.active::before {
             content: '';
@@ -346,15 +346,15 @@ HTML = """
         }
         
         .panel-header { 
-            display: flex; 
+            display: flex;
             justify-content: space-between; 
             align-items: center; 
             border-bottom: 1px solid var(--border); 
             padding-bottom: 15px; 
-            margin-bottom: 20px; 
+            margin-bottom: 20px;
         }
         .panel-title { 
-            font-size: 1.15rem; 
+            font-size: 1.15rem;
             font-weight: 600; 
             color: #fff;
             display: flex;
@@ -363,7 +363,7 @@ HTML = """
             font-family: 'Oxanium', sans-serif;
         }
         .badge { 
-            padding: 4px 10px; 
+            padding: 4px 10px;
             font-size: 0.75rem; 
             border-radius: 6px; 
             font-weight: 700; 
@@ -374,61 +374,105 @@ HTML = """
         .config-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 20px; margin-bottom: 20px; }
         
         .list-box { 
-            height: 350px; 
+            height: 350px;
             overflow-y: auto; 
             background: #040608; 
             border: 1px solid var(--border); 
             padding: 8px; 
-            border-radius: 10px; 
+            border-radius: 10px;
         }
         .check-item { 
-            display: flex; 
+            display: flex;
             align-items: center; 
-            padding: 10px; 
+            padding: 8px 10px; 
             cursor: pointer; 
             border-radius: 6px;
             margin-bottom: 2px;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             transition: background 0.2s;
         }
         .check-item:hover { background: #111b14; color: var(--primary); }
         .check-item input { 
-            margin-right: 12px; 
+            margin-right: 12px;
             accent-color: var(--primary);
-            width: 16px;
-            height: 16px;
+            width: 14px;
+            height: 14px;
         }
 
+        /* --- FOLDER STYLES UPDATE --- */
         .folder-header { 
-            background: #151d25; 
+            background: #151d25;
             color: #ccc; 
-            padding: 10px 12px; 
+            padding: 8px 12px; 
             font-weight: 600; 
             font-size: 0.85rem; 
             display: flex; 
             justify-content: space-between; 
             align-items: center;
-            position: sticky; 
-            top: 0; 
-            z-index: 10; 
-            border-bottom: 1px solid var(--border);
             border-radius: 6px;
-            margin: 10px 0 5px 0;
+            margin: 8px 0 4px 0;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s;
+            border: 1px solid transparent;
         }
-        .folder-header button {
-            background: var(--border); 
-            color: #fff; 
-            border: none; 
-            padding: 4px 10px; 
-            font-size: 0.75rem; 
+        .folder-header:hover {
+            background: #1e2a35;
+            border-color: #2d3b48;
+            color: #fff;
+        }
+        .folder-header.active {
+            border-left: 3px solid var(--primary);
+            background: #1a232b;
+        }
+        .folder-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+        }
+        .folder-arrow {
+            transition: transform 0.2s ease;
+            font-size: 0.7rem;
+            color: var(--muted);
+        }
+        .folder-header.active .folder-arrow {
+            transform: rotate(90deg);
+            color: var(--primary);
+        }
+
+        .btn-select-all {
+            background: #252f38;
+            color: var(--text); 
+            border: 1px solid var(--border); 
+            padding: 2px 8px; 
+            font-size: 0.7rem; 
             cursor: pointer; 
             border-radius: 4px;
             transition: all 0.2s;
+            margin-left: auto;
         }
-        .folder-header button:hover { background: var(--primary); color: #000; }
+        .btn-select-all:hover { background: var(--primary); color: #000; border-color: var(--primary); }
         
+        .folder-content {
+            display: none;
+            padding-left: 6px;
+            margin-bottom: 8px;
+            border-left: 1px solid #1f2933;
+            margin-left: 12px;
+            animation: slideDown 0.2s ease-out;
+        }
+        .folder-content.active {
+            display: block;
+        }
+
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
         textarea { 
-            width: 100%; 
+            width: 100%;
             background: #040608; 
             border: 1px solid var(--border); 
             color: var(--primary); 
@@ -437,7 +481,7 @@ HTML = """
             resize: vertical; 
             margin-bottom: 15px; 
             box-sizing: border-box; 
-            min-height: 100px; 
+            min-height: 100px;
             border-radius: 10px;
             line-height: 1.5;
         }
@@ -482,9 +526,7 @@ HTML = """
                     HỆ THỐNG
                 </div>
                 <div style="margin-bottom: 8px;"><i class="fas fa-robot"></i> Bots Active: <span style="color:var(--primary); font-weight:bold;">{{ bot_count }}</span></div>
-                <div><i class="fas fa-satellite-dish"></i> API Scan: 
-                    <span style="color: var(--primary); font-size: 0.85rem;">ONLINE</span>
-                </div>
+                <div><i class="fas fa-satellite-dish"></i> API Scan: <span style="color: var(--primary); font-size: 0.85rem;">ONLINE</span></div>
             </div>
             
             <button class="btn" style="background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; margin-top: 20px;" onclick="location.reload()">
@@ -505,7 +547,7 @@ HTML = """
                 const checked = grp.bots.includes(b.index) ? 'checked' : '';
                 botChecks += `
                 <label class="check-item">
-                    <input type="checkbox" value="${b.index}" ${checked}> 
+                     <input type="checkbox" value="${b.index}" ${checked}> 
                     <i class="fas fa-user-circle" style="margin-right:8px; opacity:0.5"></i>
                     <span>Bot ${b.index + 1}: ${b.name}</span>
                 </label>`;
@@ -517,20 +559,25 @@ HTML = """
             } else {
                 folderData.forEach((folder, fIndex) => {
                     const folderIdRaw = `f-${id}-${fIndex}`;
+                    // Sửa lại giao diện Header folder: Thêm onclick toggleAccordion
                     serverListHTML += `
-                        <div class="folder-header">
-                            <span><i class="fas fa-folder" style="margin-right:8px; color:var(--primary)"></i>${folder.folder_name} <span style="opacity:0.5; font-weight:normal">(${folder.servers.length})</span></span>
-                            <button onclick="toggleFolder(this, '${folderIdRaw}')">Chọn hết</button>
+                        <div class="folder-header" onclick="toggleAccordion('${folderIdRaw}', this)">
+                            <div class="folder-left">
+                                <i class="fas fa-chevron-right folder-arrow"></i>
+                                <span><i class="fas fa-folder" style="color:var(--primary); margin-right:6px;"></i>${folder.folder_name}</span>
+                                <span style="opacity:0.5; font-size:0.75rem">(${folder.servers.length})</span>
+                            </div>
+                            <button class="btn-select-all" onclick="event.stopPropagation(); toggleFolder(this, '${folderIdRaw}')">Chọn hết</button>
                         </div>
-                        <div id="${folderIdRaw}-container" style="padding: 5px 0;">
+                        <div id="${folderIdRaw}-container" class="folder-content">
                     `;
                     folder.servers.forEach(s => {
                         const checked = grp.servers.includes(s.id) ? 'checked' : '';
                         serverListHTML += `
                         <label class="check-item">
                             <input type="checkbox" value="${s.id}" ${checked} class="${folderIdRaw}-chk"> 
-                            <img src="${s.icon}" style="width:20px; height:20px; border-radius:50%; margin-right:10px; border: 1px solid var(--border)">
-                            <span>${s.name}</span>
+                            <img src="${s.icon}" style="width:18px; height:18px; border-radius:50%; margin-right:8px; border: 1px solid var(--border)">
+                            <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</span>
                         </label>`;
                     });
                     serverListHTML += `</div>`;
@@ -572,9 +619,25 @@ HTML = """
             `;
         }
 
+        // --- NEW FUNCTION: TOGGLE ACCORDION ---
+        function toggleAccordion(id, headerEl) {
+            const content = document.getElementById(id + '-container');
+            // Toggle class active
+            content.classList.toggle('active');
+            headerEl.classList.toggle('active');
+        }
+
         function toggleFolder(btn, classPrefix) {
             const container = document.getElementById(classPrefix + '-container');
             const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+            
+            // Nếu folder đang đóng, tự động mở ra khi bấm chọn hết để user thấy
+            if (!container.classList.contains('active')) {
+                container.classList.add('active');
+                const header = container.previousElementSibling;
+                if(header) header.classList.add('active');
+            }
+
             let allChecked = true;
             checkboxes.forEach(cb => { if(!cb.checked) allChecked = false; });
             checkboxes.forEach(cb => cb.checked = !allChecked);
@@ -598,6 +661,7 @@ HTML = """
                         container.appendChild(div.firstElementChild);
                         panel = document.getElementById(`panel-${id}`);
                     }
+                    // Chỉ update trạng thái, KHÔNG render lại HTML để giữ nguyên trạng thái đóng mở folder
                     if (grp.active) panel.classList.add('active');
                     else panel.classList.remove('active');
                     
@@ -606,7 +670,7 @@ HTML = """
                     badge.style.background = grp.active ? 'var(--primary)' : '#1f2933';
                     badge.style.color = grp.active ? '#000' : '#8899a6';
                     badge.style.boxShadow = grp.active ? '0 0 15px var(--primary-glow)' : 'none';
-
+                    
                     const btnArea = document.getElementById(`btn-area-${id}`);
                     if (grp.active) {
                         btnArea.innerHTML = `<button class="btn btn-stop" onclick="toggleGroup('${id}')"><i class="fas fa-stop-circle"></i> STOP SYSTEM</button>`;
@@ -656,7 +720,7 @@ HTML = """
         }
 
         renderGroups();
-        setInterval(renderGroups, 3000); 
+        setInterval(renderGroups, 3000);
     </script>
 </body>
 </html>
@@ -697,13 +761,15 @@ def toggle_grp():
 def del_grp():
     gid = request.json['id']
     if gid in spam_groups:
-        spam_groups[gid]['active'] = False; del spam_groups[gid]
+        spam_groups[gid]['active'] = False;
+        del spam_groups[gid]
     return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
     print("🔥 SYSTEM V7 STARTING... (API Mode Scan)", flush=True)
     for i, t in enumerate(TOKENS):
-        if t.strip(): threading.Thread(target=start_bot_node, args=(t, i), daemon=True).start(); time.sleep(1)
+        if t.strip(): threading.Thread(target=start_bot_node, args=(t, i), daemon=True).start();
+        time.sleep(1)
     
     port = int(os.environ.get("PORT", 10000))
     print(f"🌍 WEB PANEL: http://0.0.0.0:{port}")
