@@ -23,11 +23,11 @@ app = Flask(__name__)
 
 # --- DỮ LIỆU ---
 bots_instances = {}   
-scanned_servers = {}  
+scanned_servers = {}  # Rổ chứa server chung
 spam_groups = {}      
 channel_cache = {}    
 
-# --- CORE LOGIC ---
+# --- CORE LOGIC: SPAM ---
 def send_message_from_sync(bot_index, channel_id, content):
     bot_data = bots_instances.get(bot_index)
     if not bot_data: return
@@ -51,13 +51,14 @@ def resolve_spam_channel(bot_indices, guild_id):
         bot = bot_data['client']
         guild = bot.get_guild(int(guild_id))
         if not guild: continue
-        for ch in guild.text_channels:
-            if ch.name == "spam":
-                target_channel_id = ch.id; break
-        if not target_channel_id:
-            for ch in guild.text_channels:
-                if "spam" in ch.name.lower():
-                    target_channel_id = ch.id; break
+        
+        # Tìm kênh spam
+        candidates = [c for c in guild.text_channels if 'spam' in c.name.lower()]
+        if candidates:
+            # Ưu tiên kênh tên "spam" chính xác
+            exact = next((c for c in candidates if c.name == 'spam'), candidates[0])
+            target_channel_id = exact.id
+
         if target_channel_id:
             channel_cache[guild_id] = target_channel_id
             return target_channel_id
@@ -121,7 +122,7 @@ def run_spam_group_logic(group_id):
         time.sleep(DELAY_BETWEEN_PAIRS)
         server_pair_index += 1
 
-# --- FIX: CẬP NHẬT QUÉT SERVER ---
+# --- CƠ CHẾ QUÉT SERVER (MỚI - GIỐNG SHARED.PY) ---
 def start_bot_node(token, index):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -134,72 +135,95 @@ def start_bot_node(token, index):
             'client': bot, 'loop': loop, 'name': bot.user.name, 'id': bot.user.id
         }
         
-        # FIX: Chờ bot load xong hẳn mới quét
-        if index == 0:
-            print("📡 [MASTER] Bot 1 đang đợi server load...", flush=True)
-            await asyncio.sleep(5) # Đợi 5s để discord cache server
-            count = 0
-            for guild in bot.guilds:
+        # MỖI BOT ĐỀU TỰ BÁO CÁO SERVER CỦA NÓ VÀO RỔ CHUNG
+        # Không chờ Bot 1 nữa, ai có server nấy góp
+        await asyncio.sleep(3) # Đợi discord load cache
+        count = 0
+        for guild in bot.guilds:
+            if str(guild.id) not in scanned_servers:
                 scanned_servers[str(guild.id)] = {
                     'name': guild.name,
                     'icon': str(guild.icon_url)
                 }
                 count += 1
-            print(f"📡 [MASTER] Đã tìm thấy {count} Servers (Từ Bot 1).", flush=True)
+        
+        if count > 0:
+            print(f"📥 Bot {index+1} đã đóng góp {count} server mới vào danh sách.", flush=True)
 
     try:
         loop.run_until_complete(bot.start(token.strip()))
     except Exception as e:
         print(f"❌ Bot {index+1} lỗi: {e}")
 
-# --- FIX: GIAO DIỆN KHÔNG BỊ LOAD LẠI ---
+# --- GIAO DIỆN WEB (ĐÃ SỬA LỖI HIỂN THỊ) ---
 HTML = """
 <!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPAM TOOL PRO</title>
+    <title>MULTI-PANEL SPAM TOOL V3</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { background: #121212; color: #e0e0e0; font-family: 'Segoe UI', monospace; margin: 0; padding: 20px; }
+        body { background: #0f0f0f; color: #f0f0f0; font-family: 'Consolas', monospace; margin: 0; padding: 20px; }
         .header { text-align: center; border-bottom: 2px solid #00ff41; padding-bottom: 10px; margin-bottom: 20px; }
-        .header h1 { color: #00ff41; margin: 0; }
+        .header h1 { color: #00ff41; margin: 0; text-transform: uppercase; }
+        
         .main-container { display: flex; gap: 20px; align-items: flex-start; }
-        .sidebar { width: 300px; background: #1e1e1e; padding: 15px; border-radius: 8px; border: 1px solid #333; }
-        .btn { width: 100%; padding: 10px; border: none; font-weight: bold; cursor: pointer; border-radius: 4px; margin-top: 5px; }
+        .sidebar { width: 320px; background: #1a1a1a; padding: 20px; border-radius: 8px; border: 1px solid #333; }
+        
+        .btn { width: 100%; padding: 12px; border: none; font-weight: bold; cursor: pointer; border-radius: 4px; margin-top: 8px; font-family: inherit; }
         .btn-create { background: #00ff41; color: #000; }
-        input[type="text"] { width: 92%; padding: 8px; background: #000; border: 1px solid #444; color: #fff; margin-bottom: 10px; }
+        .btn-create:hover { background: #00cc33; }
+        
+        input[type="text"] { width: 90%; padding: 10px; background: #000; border: 1px solid #444; color: #fff; margin-bottom: 10px; font-family: inherit; }
+        
         .groups-area { flex: 1; display: flex; flex-direction: column; gap: 20px; }
-        .panel-card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 15px; position: relative; }
-        .panel-card.active { border-color: #00ff41; box-shadow: 0 0 10px rgba(0, 255, 65, 0.1); }
-        .panel-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 10px; }
-        .badge { background: #333; padding: 2px 6px; font-size: 0.7em; border-radius: 4px; margin-left: 5px; }
-        .config-row { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }
-        .check-list { height: 250px; overflow-y: auto; background: #000; border: 1px solid #333; padding: 5px; }
-        .check-item { display: block; padding: 4px; cursor: pointer; font-size: 0.9em; border-bottom: 1px solid #222; }
+        .panel-card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 20px; position: relative; }
+        .panel-card.active { border-color: #00ff41; box-shadow: 0 0 15px rgba(0, 255, 65, 0.1); }
+        
+        .panel-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 15px; margin-bottom: 15px; }
+        .panel-title { font-size: 1.2em; font-weight: bold; color: #fff; }
+        .badge { padding: 3px 8px; font-size: 0.8em; border-radius: 4px; margin-left: 10px; font-weight: bold; }
+        
+        .config-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; margin-bottom: 15px; }
+        
+        .list-box { height: 250px; overflow-y: auto; background: #050505; border: 1px solid #333; padding: 5px; }
+        .check-item { display: flex; align-items: center; padding: 6px; cursor: pointer; border-bottom: 1px solid #222; font-size: 0.9em; }
         .check-item:hover { background: #222; color: #00ff41; }
-        textarea { width: 100%; background: #000; border: 1px solid #333; color: #00ff41; padding: 10px; font-family: inherit; resize: vertical; margin-bottom: 10px; box-sizing: border-box;}
-        .action-bar { display: flex; gap: 10px; justify-content: flex-end; }
+        .check-item input { margin-right: 10px; }
+        
+        textarea { width: 100%; background: #050505; border: 1px solid #333; color: #00ff41; padding: 10px; font-family: inherit; resize: vertical; margin-bottom: 10px; box-sizing: border-box; min-height: 80px;}
+        
+        .action-bar { display: flex; gap: 10px; justify-content: flex-end; border-top: 1px solid #333; padding-top: 15px; }
         .btn-save { background: #333; color: #fff; width: auto; }
         .btn-start { background: #00ff41; color: #000; width: auto; }
         .btn-stop { background: #ff3333; color: #fff; width: auto; }
-        .btn-del { background: #ff3333; color: #fff; width: auto; padding: 5px 10px; font-size: 0.8em; }
+        .btn-del { background: #ff3333; color: #fff; width: auto; padding: 6px 12px; font-size: 0.8em; }
+
+        .stat-box { font-size: 0.85em; color: #888; margin-top: 20px; line-height: 1.6; }
+        .stat-val { color: #fff; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div class="header"><h1>Multi-Panel Spam Tool (Fixed)</h1></div>
+    <div class="header"><h1><i class="fas fa-network-wired"></i> Multi-Panel Spam Tool V3</h1></div>
+    
     <div class="main-container">
         <div class="sidebar">
-            <h3><i class="fas fa-plus-circle"></i> Create Panel</h3>
-            <input type="text" id="groupName" placeholder="Tên nhóm...">
-            <button class="btn btn-create" onclick="createGroup()">Tạo Nhóm Mới</button>
-            <hr style="border-color: #333; margin: 20px 0;">
-            <div style="font-size: 0.85em; color: #888;">
-                <p>Bot Online: <b style="color: #fff">{{ bot_count }}</b></p>
-                <p>Servers (Bot 1): <b style="color: #fff">{{ server_count }}</b></p>
+            <h3><i class="fas fa-layer-group"></i> Create Panel</h3>
+            <input type="text" id="groupName" placeholder="Đặt tên nhóm (VD: Raid Team 1)...">
+            <button class="btn btn-create" onclick="createGroup()">TẠO NHÓM MỚI</button>
+            
+            <div class="stat-box">
+                <div>Bot Online: <span class="stat-val">{{ bot_count }}</span></div>
+                <div>Servers Found: <span class="stat-val">{{ server_count }}</span></div>
+                <div style="font-size: 0.8em; margin-top: 5px; color: #555;">* Server được tổng hợp từ tất cả các bot.</div>
             </div>
+            
+            <hr style="border-color: #333; margin: 20px 0;">
+            <button class="btn" style="background: #333; color: #aaa;" onclick="location.reload()">Refresh Data</button>
         </div>
+
         <div id="groupsList" class="groups-area"></div>
     </div>
 
@@ -207,42 +231,61 @@ HTML = """
         const bots = {{ bots_json|safe }};
         const servers = {{ servers_json|safe }};
 
-        // Hàm này chỉ tạo HTML nếu Panel chưa tồn tại
         function createPanelHTML(id, grp) {
+            // Render Bot List
             let botChecks = '';
             bots.forEach(b => {
                 const checked = grp.bots.includes(b.index) ? 'checked' : '';
-                botChecks += `<label class="check-item"><input type="checkbox" value="${b.index}" ${checked}> ${b.name}</label>`;
+                botChecks += `
+                <label class="check-item">
+                    <input type="checkbox" value="${b.index}" ${checked}> 
+                    <span>Bot ${b.index + 1}: ${b.name}</span>
+                </label>`;
             });
 
+            // Render Server List
             let serverChecks = '';
-            servers.forEach(s => {
-                const checked = grp.servers.includes(s.id) ? 'checked' : '';
-                serverChecks += `<label class="check-item"><input type="checkbox" value="${s.id}" ${checked}> ${s.name}</label>`;
-            });
+            if (servers.length === 0) {
+                serverChecks = '<div style="padding:10px; color:#666; text-align:center;">Đang quét server...<br>Hãy đợi 1 chút rồi F5 lại trang.</div>';
+            } else {
+                servers.forEach(s => {
+                    const checked = grp.servers.includes(s.id) ? 'checked' : '';
+                    serverChecks += `
+                    <label class="check-item">
+                        <input type="checkbox" value="${s.id}" ${checked}> 
+                        <span>${s.name}</span>
+                    </label>`;
+                });
+            }
 
             return `
                 <div class="panel-card" id="panel-${id}">
                     <div class="panel-header">
-                        <div class="panel-title"><span id="title-${id}">${grp.name}</span> <span id="badge-${id}" class="badge">IDLE</span></div>
+                        <div class="panel-title">
+                            <i class="fas fa-robot"></i> ${grp.name} 
+                            <span id="badge-${id}" class="badge">IDLE</span>
+                        </div>
                         <button class="btn btn-del" onclick="deleteGroup('${id}')"><i class="fas fa-trash"></i></button>
                     </div>
-                    <div class="config-row">
+                    
+                    <div class="config-grid">
                         <div>
-                            <div style="margin-bottom:5px; font-weight:bold; color:#00ff41">🤖 Chọn Bot</div>
-                            <div class="check-list" id="bots-${id}">${botChecks}</div>
+                            <div style="margin-bottom:8px; font-weight:bold; color:#00ff41"><i class="fas fa-user-astronaut"></i> CHỌN BOT</div>
+                            <div class="list-box" id="bots-${id}">${botChecks}</div>
                         </div>
                         <div>
-                            <div style="margin-bottom:5px; font-weight:bold; color:#00ff41">📂 Chọn Server</div>
-                            <div class="check-list" id="servers-${id}">${serverChecks}</div>
+                            <div style="margin-bottom:8px; font-weight:bold; color:#00ff41"><i class="fas fa-server"></i> CHỌN SERVER (Global List)</div>
+                            <div class="list-box" id="servers-${id}">${serverChecks}</div>
                         </div>
                     </div>
+                    
                     <div>
-                        <div style="margin-bottom:5px; font-weight:bold;">💬 Nội dung Spam</div>
-                        <textarea id="msg-${id}" rows="2">${grp.message || ''}</textarea>
+                        <div style="margin-bottom:8px; font-weight:bold;"><i class="fas fa-comment-dots"></i> NỘI DUNG SPAM</div>
+                        <textarea id="msg-${id}" placeholder="Nhập nội dung spam vào đây...">${grp.message || ''}</textarea>
                     </div>
+                    
                     <div class="action-bar">
-                        <button class="btn btn-save" onclick="saveGroup('${id}')"><i class="fas fa-save"></i> Lưu Config</button>
+                        <button class="btn btn-save" onclick="saveGroup('${id}')"><i class="fas fa-save"></i> LƯU CẤU HÌNH</button>
                         <span id="btn-area-${id}"></span>
                     </div>
                 </div>
@@ -252,9 +295,9 @@ HTML = """
         function renderGroups() {
             fetch('/api/groups').then(r => r.json()).then(data => {
                 const container = document.getElementById('groupsList');
-                
-                // Xóa các panel không còn tồn tại trên server
                 const currentIds = Object.keys(data);
+                
+                // Xóa panel cũ
                 Array.from(container.children).forEach(child => {
                     const childId = child.id.replace('panel-', '');
                     if (!currentIds.includes(childId)) child.remove();
@@ -263,7 +306,7 @@ HTML = """
                 for (const [id, grp] of Object.entries(data)) {
                     let panel = document.getElementById(`panel-${id}`);
                     
-                    // Nếu Panel chưa có -> Tạo mới
+                    // Nếu chưa có thì tạo mới
                     if (!panel) {
                         const div = document.createElement('div');
                         div.innerHTML = createPanelHTML(id, grp);
@@ -271,33 +314,28 @@ HTML = """
                         panel = document.getElementById(`panel-${id}`);
                     }
 
-                    // --- CHỈ CẬP NHẬT TRẠNG THÁI (KHÔNG CẬP NHẬT CHECKBOX) ---
-                    // Cập nhật class Active/Idle
+                    // Cập nhật trạng thái UI (Không load lại checkbox)
                     if (grp.active) panel.classList.add('active');
                     else panel.classList.remove('active');
 
-                    // Cập nhật Badge
                     const badge = document.getElementById(`badge-${id}`);
-                    badge.innerText = grp.active ? 'RUNNING' : 'IDLE';
+                    badge.innerText = grp.active ? 'ĐANG CHẠY' : 'ĐÃ DỪNG';
                     badge.style.background = grp.active ? '#00ff41' : '#333';
                     badge.style.color = grp.active ? '#000' : '#fff';
 
-                    // Cập nhật nút Bấm (Start/Stop)
                     const btnArea = document.getElementById(`btn-area-${id}`);
                     if (grp.active) {
-                        btnArea.innerHTML = `<button class="btn btn-stop" onclick="toggleGroup('${id}')"><i class="fas fa-stop"></i> STOP</button>`;
+                        btnArea.innerHTML = `<button class="btn btn-stop" onclick="toggleGroup('${id}')"><i class="fas fa-stop"></i> DỪNG LẠI</button>`;
                     } else {
-                        btnArea.innerHTML = `<button class="btn btn-start" onclick="toggleGroup('${id}')"><i class="fas fa-play"></i> START</button>`;
+                        btnArea.innerHTML = `<button class="btn btn-start" onclick="toggleGroup('${id}')"><i class="fas fa-play"></i> BẮT ĐẦU SPAM</button>`;
                     }
-                    
-                    // Lưu ý: Chúng ta KHÔNG chạm vào ô input/textarea để tránh mất dữ liệu khi user đang nhập
                 }
             });
         }
 
         function createGroup() {
             const name = document.getElementById('groupName').value;
-            if(!name) return;
+            if(!name) return alert("Vui lòng nhập tên nhóm!");
             fetch('/api/create', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name}) })
             .then(() => { document.getElementById('groupName').value = ''; renderGroups(); });
         }
@@ -316,21 +354,25 @@ HTML = """
         }
 
         function deleteGroup(id) {
-            if(confirm('Xóa nhóm này?')) fetch('/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) }).then(() => renderGroups());
+            if(confirm('Bạn có chắc muốn xóa nhóm này không?')) 
+                fetch('/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) }).then(() => renderGroups());
         }
 
+        // Khởi chạy
         renderGroups();
-        setInterval(renderGroups, 2000); // Check trạng thái mỗi 2s
+        setInterval(renderGroups, 2000);
     </script>
 </body>
 </html>
 """
 
+# --- API ---
 @app.route('/')
 def index():
     bots_list = [{'index': k, 'name': v['name']} for k, v in bots_instances.items()]
-    servers_list = [{'id': k, 'name': v['name']} for k, v in scanned_servers.items()]
-    return render_template_string(HTML, bots_json=bots_list, servers_json=servers_list, bot_count=len(bots_instances), server_count=len(scanned_servers))
+    # Sắp xếp server theo tên
+    servers_sorted = sorted([{'id': k, 'name': v['name']} for k, v in scanned_servers.items()], key=lambda x: x['name'])
+    return render_template_string(HTML, bots_json=bots_list, servers_json=servers_sorted, bot_count=len(bots_instances), server_count=len(scanned_servers))
 
 @app.route('/api/groups')
 def get_groups(): return jsonify(spam_groups)
@@ -346,7 +388,7 @@ def update_grp():
     d = request.json
     if d['id'] in spam_groups:
         spam_groups[d['id']].update({'bots': d['bots'], 'servers': d['servers'], 'message': d['message']})
-    return jsonify({'status': 'ok', 'msg': 'Đã Lưu Cấu Hình!'})
+    return jsonify({'status': 'ok', 'msg': '✅ Đã lưu cấu hình!'})
 
 @app.route('/api/toggle', methods=['POST'])
 def toggle_grp():
@@ -368,6 +410,7 @@ if __name__ == '__main__':
     print("🔥 SYSTEM STARTING...", flush=True)
     for i, t in enumerate(TOKENS):
         if t.strip(): threading.Thread(target=start_bot_node, args=(t, i), daemon=True).start(); time.sleep(1)
+    
     port = int(os.environ.get("PORT", 10000))
-    print(f"🌍 WEB PANEL: http://0.0.0.0:{port}")
+    print(f"🌍 WEB PANEL RUNNING: http://0.0.0.0:{port}")
     app.run(host='0.0.0.0', port=port)
